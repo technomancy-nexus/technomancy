@@ -1,3 +1,6 @@
+pub mod game_dsl;
+
+use game_dsl::GameDsl;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
@@ -77,10 +80,35 @@ impl Player {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TurnStepName(String);
+
+#[derive(Debug, Clone)]
+enum TurnEvent {
+    TurnStart,
+    TurnStep(TurnStepName),
+    TurnEnd,
+}
+
+#[derive(Debug, Clone)]
+enum GameEvent {
+    GameStart,
+    TurnEvent {
+        player_id: PlayerId,
+        turn_event: TurnEvent,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct GameRule {
+    on_trigger: Vec<GameDsl>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GameState {
     configured_zones: HashSet<ZoneName>,
     players: HashMap<PlayerId, Player>,
+    rules: HashMap<GameEvent, GameRule>,
 }
 
 #[derive(Debug)]
@@ -127,21 +155,31 @@ impl GameState {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Card, GameAction, GameActionInput, GameState, Player, PlayerId, ZoneName};
+    use crate::{
+        game_dsl::GameDsl, Card, GameAction, GameActionInput, GameEvent, GameRule, GameState,
+        Player, PlayerId, ZoneName,
+    };
+
+    macro_rules! run_game {
+        (@input $input:expr) => { $input };
+        (@input) => { GameActionInput::default() };
+        ($game:expr => [ $($update:expr $(=> $input:expr)?),+ $(,)? ]) => {{
+            let game = &$game;
+            $( let game = game.update( $update, run_game!(@input $($input)?) ).unwrap(); )+
+            game
+        }};
+    }
 
     #[test]
     fn check_adding_players() {
         let old_state = GameState::default();
 
-        let new_state = old_state
-            .update(
-                GameAction::AddPlayer(Player {
-                    id: PlayerId::new(),
-                    ..Default::default()
-                }),
-                GameActionInput::default(),
-            )
-            .unwrap();
+        let new_state = run_game!( old_state => [
+            GameAction::AddPlayer(Player {
+                id: PlayerId::new(),
+                ..Default::default()
+            }),
+        ]);
 
         assert_eq!(new_state.players().len(), 1);
         assert_eq!(old_state.players().len(), 0);
@@ -152,21 +190,12 @@ mod tests {
         let old_state = GameState::default();
 
         let first_player = PlayerId::new();
-        let new_state = old_state
-            .update(
+        let new_state = run_game!(old_state => [
                 GameAction::AddPlayer(Player {
                     id: first_player,
                     ..Default::default()
                 }),
-                GameActionInput::default(),
-            )
-            .unwrap()
-            .update(
                 GameAction::AddZone(crate::ZoneName(String::from("hand"))),
-                GameActionInput::default(),
-            )
-            .unwrap()
-            .update(
                 GameAction::AddCardsTo {
                     target_zone: crate::TargetZone {
                         player_id: first_player,
@@ -174,9 +203,44 @@ mod tests {
                     },
                     cards: vec![Card],
                 },
-                GameActionInput::default(),
-            )
-            .unwrap();
+        ]);
+
+        assert_eq!(
+            new_state.players()[&first_player].zones()[&ZoneName(String::from("hand"))].len(),
+            1
+        );
+    }
+
+    #[test]
+    fn check_start_game_rules() {
+        let old_state = GameState::default();
+
+        let first_player = PlayerId::new();
+        let new_state = run_game!(old_state => [
+                GameAction::AddPlayer(Player {
+                    id: first_player,
+                    ..Default::default()
+                }),
+                GameAction::AddZone(crate::ZoneName(String::from("hand"))),
+                GameAction::AddCardsTo {
+                    target_zone: crate::TargetZone {
+                        player_id: first_player,
+                        zone_name: ZoneName(String::from("hand")),
+                    },
+                    cards: vec![Card],
+                },
+                // GameAction::AddRule {
+                //     game_event: GameEvent::GameStart,
+                //     game_rule: GameRule { on_trigger: vec![ GameDsl::parse_from(r#"
+                //         for $player in $game.all_players() {
+                //             let $deck = $player.get_zone("deck");
+                //             let $hand_cards = $deck.take_cards_from_start(7);
+                //             let $hand = $players.get_zone("hand");
+                //             $hand.add_cards_to_start($hand_cards);
+                //         }
+                //     "#) ] }
+                // },
+        ]);
 
         assert_eq!(
             new_state.players()[&first_player].zones()[&ZoneName(String::from("hand"))].len(),
