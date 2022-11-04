@@ -1,8 +1,13 @@
 pub mod game_dsl;
 
-use game_dsl::GameDsl;
-use std::collections::{HashMap, HashSet};
+use game_dsl::{EvaluationError, Expression, GameDsl};
+use std::{
+    borrow::Borrow,
+    collections::{HashMap, HashSet},
+};
 use uuid::Uuid;
+
+use crate::game_dsl::MethodFunction;
 
 #[derive(Debug, Clone, Default)]
 pub struct Card;
@@ -12,6 +17,12 @@ pub struct GameActionInput;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ZoneName(String);
+
+impl Borrow<str> for ZoneName {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TargetZone {
@@ -31,11 +42,16 @@ impl TargetZone {
 
 #[derive(Debug)]
 pub enum GameAction {
+    StartGame,
     AddPlayer(Player),
     AddZone(ZoneName),
     AddCardsTo {
         target_zone: TargetZone,
         cards: Vec<Card>,
+    },
+    AddRule {
+        game_event: GameEvent,
+        game_rule: GameRule,
     },
 }
 
@@ -78,20 +94,51 @@ impl Player {
     ) -> Result<&mut Vec<Card>, GameUpdateError> {
         Ok(self.zones.entry(zone_name.clone()).or_default())
     }
+
+    fn as_game_object(&self) -> Expression {
+        let zones: HashMap<ZoneName, Vec<Expression>> = self
+            .zones()
+            .iter()
+            .map(|(name, cards)| {
+                (
+                    name.clone(),
+                    cards.iter().map(|card| card.as_game_object()).collect(),
+                )
+            })
+            .collect();
+        Expression::GameObject(game_dsl::GameObject {
+            methods: [(
+                String::from("get_zone"),
+                Box::new(move |args: Vec<Expression>| {
+                    if let Some(Expression::String(zone_name)) = args.get(0) {
+                        if let Some(cards) = zones.get(zone_name.as_str()) {
+                            Ok(Expression::Array(cards.to_vec()))
+                        } else {
+                            Ok(Expression::Array(vec![]))
+                        }
+                    } else {
+                        Err(EvaluationError::InvalidType)
+                    }
+                }) as Box<dyn MethodFunction>,
+            )]
+            .into_iter()
+            .collect(),
+        })
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct TurnStepName(String);
 
-#[derive(Debug, Clone)]
-enum TurnEvent {
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum TurnEvent {
     TurnStart,
     TurnStep(TurnStepName),
     TurnEnd,
 }
 
-#[derive(Debug, Clone)]
-enum GameEvent {
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum GameEvent {
     GameStart,
     TurnEvent {
         player_id: PlayerId,
@@ -100,7 +147,7 @@ enum GameEvent {
 }
 
 #[derive(Debug, Clone)]
-struct GameRule {
+pub struct GameRule {
     on_trigger: Vec<GameDsl>,
 }
 
@@ -108,13 +155,17 @@ struct GameRule {
 pub struct GameState {
     configured_zones: HashSet<ZoneName>,
     players: HashMap<PlayerId, Player>,
-    rules: HashMap<GameEvent, GameRule>,
+    rules: HashMap<GameEvent, Vec<GameRule>>,
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum GameUpdateError {
+    #[error("An unknown player id was given")]
     UnknownPlayer(PlayerId),
+    #[error("An unknown zone id was given")]
     UnknownZone(ZoneName),
+    #[error("Could not succesfully evaluate")]
+    Evaluation(#[from] EvaluationError),
 }
 
 impl GameState {
@@ -137,6 +188,35 @@ impl GameState {
                 let zone = player.get_zone_mut(target_zone.zone_name())?;
                 zone.extend(cards);
             }
+            GameAction::AddRule {
+                game_event,
+                game_rule,
+            } => {
+                new_state
+                    .rules
+                    .entry(game_event)
+                    .or_default()
+                    .push(game_rule);
+            }
+            GameAction::StartGame => {
+                let no_rules = &vec![];
+                let applicable_rules = new_state
+                    .rules
+                    .get(&GameEvent::GameStart)
+                    .unwrap_or(no_rules);
+
+                let mut actions: Vec<GameDsl> = vec![];
+
+                for rule in applicable_rules {
+                    actions.extend(rule.on_trigger.clone());
+                }
+
+                let mut context = new_state.get_evaluation_context();
+
+                for action in actions {
+                    action.evaluate(&mut context)?;
+                }
+            }
         }
 
         Ok(new_state)
@@ -150,6 +230,28 @@ impl GameState {
         self.players
             .get_mut(&player_id)
             .ok_or_else(|| GameUpdateError::UnknownPlayer(player_id))
+    }
+
+    fn get_evaluation_context(&self) -> game_dsl::EvaluationContext {
+        let players: Vec<Expression> = self
+            .players()
+            .iter()
+            .map(|(_, ply)| ply.as_game_object())
+            .collect();
+
+        let game = Expression::GameObject(game_dsl::GameObject {
+            methods: [(
+                String::from("all_players"),
+                Box::new(move |_args: Vec<Expression>| Ok(Expression::Array(players.clone())))
+                    as Box<dyn MethodFunction>,
+            )]
+            .into_iter()
+            .collect(),
+        });
+
+        game_dsl::EvaluationContext {
+            values: [("game".to_string(), game)].into_iter().collect(),
+        }
     }
 }
 
@@ -222,29 +324,36 @@ mod tests {
                     ..Default::default()
                 }),
                 GameAction::AddZone(crate::ZoneName(String::from("hand"))),
+                GameAction::AddZone(crate::ZoneName(String::from("deck"))),
                 GameAction::AddCardsTo {
                     target_zone: crate::TargetZone {
                         player_id: first_player,
-                        zone_name: ZoneName(String::from("hand")),
+                        zone_name: ZoneName(String::from("deck")),
                     },
-                    cards: vec![Card],
+                    cards: vec![Card; 10],
                 },
-                // GameAction::AddRule {
-                //     game_event: GameEvent::GameStart,
-                //     game_rule: GameRule { on_trigger: vec![ GameDsl::parse_from(r#"
-                //         for $player in $game.all_players() {
-                //             let $deck = $player.get_zone("deck");
-                //             let $hand_cards = $deck.take_cards_from_start(7);
-                //             let $hand = $players.get_zone("hand");
-                //             $hand.add_cards_to_start($hand_cards);
-                //         }
-                //     "#) ] }
-                // },
+                GameAction::AddRule {
+                    game_event: GameEvent::GameStart,
+                    game_rule: GameRule { on_trigger: vec![ GameDsl::parse_from(r#"
+                        for player in game.all_players() {
+                            let deck = player.get_zone("deck");
+                            let hand_cards = deck.take_cards_from_top(7);
+                            let hand = players.get_zone("hand");
+                            hand.add_cards_to_start(hand_cards);
+                        }
+                    "#).unwrap() ] }
+                },
+                GameAction::StartGame,
         ]);
 
         assert_eq!(
             new_state.players()[&first_player].zones()[&ZoneName(String::from("hand"))].len(),
-            1
+            7
         );
+    }
+}
+impl Card {
+    fn as_game_object(&self) -> Expression {
+        todo!()
     }
 }

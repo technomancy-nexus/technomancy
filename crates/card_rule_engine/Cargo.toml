@@ -8,6 +8,7 @@ edition.workspace = true
 [dependencies]
 nom = "7.1.1"
 nom-supreme = "0.8.0"
+thiserror = "1.0.37"
 uuid = { version = "1.2.1", features = ["v4"] }
 
 [dev-dependencies]

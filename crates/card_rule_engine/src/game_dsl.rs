@@ -4,36 +4,36 @@ use nom::{
     branch::alt,
     character::{
         self,
-        complete::{alpha1, alphanumeric0, anychar, char, multispace0, multispace1, none_of},
+        complete::{alpha1, char, multispace0, multispace1, none_of, satisfy},
     },
     error::{Error, ErrorKind},
-    multi::{many0, many1, separated_list0, separated_list1},
+    multi::{many0, many0_count, many1, separated_list0},
     sequence::{delimited, pair, separated_pair, terminated},
     IResult, Parser,
 };
-use nom_supreme::{error::ErrorTree, tag::complete::tag, ParserExt};
+use nom_supreme::{error::ErrorTree, final_parser::final_parser, tag::complete::tag, ParserExt};
 
 #[derive(Debug, Clone)]
-struct ForLoop {
+pub struct ForLoop {
     variable: Variable,
     source: Box<Expression>,
     body: Vec<Expression>,
 }
 
 #[derive(Debug, Clone)]
-struct LetVariable {
+pub struct LetVariable {
     variable: Variable,
     value: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
-struct Variable(String);
+pub struct Variable(String);
 
 #[derive(Debug, Clone)]
 struct DslProgram;
 
 #[derive(Debug, Clone)]
-enum Expression {
+pub enum Expression {
     LetVariable(LetVariable),
     ForLoop(ForLoop),
 
@@ -57,17 +57,17 @@ enum Expression {
     GameObject(GameObject),
 }
 
-trait MethodFunction {
-    fn call(&self, args: Vec<Expression>) -> Expression;
+pub trait MethodFunction {
+    fn call(&mut self, args: Vec<Expression>) -> Result<Expression, EvaluationError>;
 
     fn clone_boxed(&self) -> Box<dyn MethodFunction>;
 }
 
 impl<F> MethodFunction for F
 where
-    F: Fn(Vec<Expression>) -> Expression + Clone + 'static,
+    F: FnMut(Vec<Expression>) -> Result<Expression, EvaluationError> + Clone + 'static,
 {
-    fn call(&self, args: Vec<Expression>) -> Expression {
+    fn call(&mut self, args: Vec<Expression>) -> Result<Expression, EvaluationError> {
         (*self)(args)
     }
 
@@ -76,8 +76,8 @@ where
     }
 }
 
-struct GameObject {
-    methods: HashMap<String, Box<dyn MethodFunction>>,
+pub struct GameObject {
+    pub methods: HashMap<String, Box<dyn MethodFunction>>,
 }
 
 impl Clone for GameObject {
@@ -101,7 +101,17 @@ impl std::fmt::Debug for GameObject {
 }
 
 fn parse_ident(input: &str) -> IResult<&str, &str, ErrorTree<&str>> {
-    pair(alpha1, alphanumeric0).recognize().parse(input)
+    pair(
+        alpha1,
+        many0_count(satisfy(|c| {
+            ('a'..='z').contains(&c)
+                || ('A'..='Z').contains(&c)
+                || ('0'..='9').contains(&c)
+                || ['_'].contains(&c)
+        })),
+    )
+    .recognize()
+    .parse(input)
 }
 
 fn parse_number(input: &str) -> IResult<&str, Expression, ErrorTree<&str>> {
@@ -112,7 +122,7 @@ fn parse_number(input: &str) -> IResult<&str, Expression, ErrorTree<&str>> {
 }
 
 fn parse_method_call(input: &str) -> IResult<&str, Expression, ErrorTree<&str>> {
-    let call = separated_pair(parse_ident, char('.'), parse_ident);
+    let call = separated_pair(parse_ident, char('.'), parse_ident.cut());
 
     let args = delimited(
         char('('),
@@ -227,7 +237,11 @@ fn parse_statements(input: &str) -> IResult<&str, Vec<Expression>, ErrorTree<&st
                 .precedes(parse_expression)
                 .cut(),
         )
-        .and(delimited(char('{'), parse_statements.cut(), char('}')))
+        .and(delimited(
+            char('{').cut().delimited_by(multispace0),
+            parse_statements.cut(),
+            char('}').cut().delimited_by(multispace0),
+        ))
         .map(|((variable, source), body)| {
             Expression::ForLoop(ForLoop {
                 variable: Variable(variable.to_string()),
@@ -236,7 +250,7 @@ fn parse_statements(input: &str) -> IResult<&str, Vec<Expression>, ErrorTree<&st
             })
         });
 
-    many0(
+    many1(
         alt((
             terminated(parse_let_variable, char(';').delimited_by(multispace0)),
             terminated(parse_expression, char(';').delimited_by(multispace0)),
@@ -246,22 +260,39 @@ fn parse_statements(input: &str) -> IResult<&str, Vec<Expression>, ErrorTree<&st
     )(input)
 }
 
-struct EvaluationContext {
-    values: HashMap<String, Expression>,
+pub struct EvaluationContext {
+    pub values: HashMap<String, Expression>,
 }
 
-fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result<Expression, ()> {
+#[derive(thiserror::Error, Debug)]
+pub enum EvaluationError {
+    #[error("A value was declared twice: {}", .0)]
+    DuplicateValue(String),
+    #[error("A variable was not declared before: {}", .0)]
+    ValueNotFound(String),
+    #[error("A method was not declared before: {}", .0)]
+    MethodNotFound(String),
+    #[error("An unexpected type was given for the operation")]
+    InvalidType,
+}
+
+fn eval_expression(
+    context: &mut EvaluationContext,
+    input: Expression,
+) -> Result<Expression, EvaluationError> {
     match input {
         Expression::LetVariable(LetVariable { variable, value }) => {
             let value = eval_expression(context, *value)?;
-            if let Some(_) = context.values.insert(variable.0, value) {
-                return Err(());
+            if let Some(_) = context.values.insert(variable.0.to_string(), value) {
+                return Err(EvaluationError::DuplicateValue(variable.0.to_string()));
             };
 
             Ok(Expression::Void)
         }
         Expression::Variable(Variable(var)) => {
-            Ok(Expression::clone(context.values.get(&var).ok_or(())?))
+            Ok(Expression::clone(context.values.get(&var).ok_or_else(
+                || EvaluationError::ValueNotFound(var.to_string()),
+            )?))
         }
         Expression::ForLoop(ForLoop {
             variable,
@@ -272,7 +303,7 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
             match source {
                 Expression::Array(values) => {
                     if context.values.remove(&variable.0).is_some() {
-                        return Err(());
+                        return Err(EvaluationError::DuplicateValue(variable.0.to_string()));
                     }
 
                     for val in values {
@@ -290,7 +321,7 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
 
                     Ok(Expression::Void)
                 }
-                _ => return Err(()),
+                _ => return Err(EvaluationError::InvalidType),
             }
         }
         Expression::Negated(val) => {
@@ -298,7 +329,7 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
 
             match val {
                 Expression::Number(num) => Ok(Expression::Number(-num)),
-                _ => Err(()),
+                _ => return Err(EvaluationError::InvalidType),
             }
         }
         Expression::Multiply(lhs, rhs) => {
@@ -309,7 +340,7 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_mul(rhs)))
                 }
-                _ => Err(()),
+                _ => return Err(EvaluationError::InvalidType),
             }
         }
         Expression::Divide(lhs, rhs) => {
@@ -320,7 +351,7 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_div(rhs)))
                 }
-                _ => Err(()),
+                _ => return Err(EvaluationError::InvalidType),
             }
         }
         Expression::Add(lhs, rhs) => {
@@ -331,7 +362,7 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_add(rhs)))
                 }
-                _ => Err(()),
+                _ => return Err(EvaluationError::InvalidType),
             }
         }
         Expression::Substract(lhs, rhs) => {
@@ -342,7 +373,7 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_sub(rhs)))
                 }
-                _ => Err(()),
+                _ => return Err(EvaluationError::InvalidType),
             }
         }
         Expression::MethodCall {
@@ -355,13 +386,19 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
                 .map(|input| eval_expression(context, input))
                 .collect::<Result<_, _>>()?;
 
-            let var = context.values.get(&variable).ok_or(())?;
+            let var = context
+                .values
+                .get_mut(&variable)
+                .ok_or_else(|| EvaluationError::ValueNotFound(variable.to_string()))?;
             let meth = match var {
-                Expression::GameObject(obj) => obj.methods.get(&method).ok_or(())?,
-                _ => return Err(()),
+                Expression::GameObject(obj) => obj
+                    .methods
+                    .get_mut(&method)
+                    .ok_or_else(|| EvaluationError::MethodNotFound(method.to_string()))?,
+                _ => return Err(EvaluationError::InvalidType),
             };
 
-            Ok(meth.call(arguments))
+            meth.call(arguments)
         }
         expr @ Expression::Number(_)
         | expr @ Expression::GameObject(_)
@@ -372,7 +409,23 @@ fn eval_expression(context: &mut EvaluationContext, input: Expression) -> Result
 }
 
 #[derive(Debug, Clone)]
-pub struct GameDsl(Expression);
+pub struct GameDsl(Vec<Expression>);
+
+impl GameDsl {
+    pub fn parse_from(input: &str) -> Result<Self, ErrorTree<&str>> {
+        let stmts = final_parser(parse_statements)(input)?;
+
+        Ok(GameDsl(stmts))
+    }
+
+    pub fn evaluate(self, context: &mut EvaluationContext) -> Result<(), EvaluationError> {
+        for expr in self.0 {
+            eval_expression(context, expr)?;
+        }
+
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -387,7 +440,7 @@ mod tests {
     use crate::game_dsl::parse_statements;
 
     use super::{
-        eval_expression, parse_let_variable, EvaluationContext, Expression, GameObject,
+        eval_expression, parse_let_variable, EvaluationContext, Expression, GameDsl, GameObject,
         MethodFunction,
     };
 
@@ -437,7 +490,7 @@ mod tests {
         let final_val = val.clone();
         let print_method: Box<dyn MethodFunction> = Box::new(move |args: Vec<Expression>| {
             *val.borrow_mut() = args[0].clone();
-            Expression::Void
+            Ok(Expression::Void)
         });
         let game = GameObject {
             methods: [("print".to_string(), print_method)].into_iter().collect(),
@@ -460,5 +513,23 @@ mod tests {
         println!("{:?}", final_val.borrow());
 
         assert_matches!(*final_val.borrow(), Expression::Number(1234));
+    }
+
+    #[test]
+    fn parse_complex() {
+        let input = r#"
+            for player in game.all_players() {
+                let deck = player.get_zone("deck");
+                let hand_cards = deck.take_cards_from_top(7);
+                let hand = players.get_zone("hand");
+                hand.add_cards_to_start(hand_cards);
+            }
+        "#;
+
+        let res = parse_statements(input);
+
+        println!("{:#?}", res);
+
+        assert_matches!(res, Ok(("", _)));
     }
 }
