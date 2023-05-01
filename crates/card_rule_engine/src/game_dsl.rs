@@ -13,6 +13,8 @@ use nom::{
 };
 use nom_supreme::{error::ErrorTree, final_parser::final_parser, tag::complete::tag, ParserExt};
 
+use crate::game_state::GameState;
+
 #[derive(Debug, Clone)]
 pub struct ForLoop {
     variable: Variable,
@@ -57,39 +59,120 @@ pub enum Expression {
     GameObject(GameObject),
 }
 
-pub trait MethodFunction {
-    fn call(&mut self, args: Vec<Expression>) -> Result<Expression, EvaluationError>;
+impl Expression {
+    pub fn get_kind(&self, context: &EvaluationContext) -> Result<ExpressionKind, EvaluationError> {
+        match self {
+            Expression::LetVariable(LetVariable { variable: _, value }) => value.get_kind(context),
+            Expression::ForLoop(_) => Ok(ExpressionKind::Void),
+            Expression::Variable(variable) => context
+                .values
+                .get(&variable.0)
+                .ok_or_else(|| EvaluationError::ValueNotFound(variable.0.to_string()))
+                .and_then(|val| val.get_kind(context)),
+            Expression::Array(arr) => Ok(arr
+                .first()
+                .map(|val| val.get_kind(context))
+                .transpose()?
+                .unwrap_or(ExpressionKind::Void)),
+            Expression::MethodCall {
+                variable,
+                method,
+                arguments,
+            } => {
+                let obj = if let Some(obj) = context.values.get(variable) {
+                    obj
+                } else {
+                    return Err(EvaluationError::ValueNotFound(variable.to_string()));
+                };
 
+                let method = if let Expression::GameObject(GameObject { methods, .. }) = obj {
+                    if let Some(method) = methods.get(method) {
+                        method
+                    } else {
+                        return Err(EvaluationError::MethodNotFound(method.to_string()));
+                    }
+                } else {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::GameObject(String::new()),
+                        found: ExpressionKind::Void,
+                    });
+                };
+
+                Ok(method.kind_signature.clone())
+            }
+            Expression::Negated(_) => todo!(),
+            Expression::Multiply(_, _) => todo!(),
+            Expression::Divide(_, _) => todo!(),
+            Expression::Add(_, _) => todo!(),
+            Expression::Substract(_, _) => todo!(),
+            Expression::Number(_) => todo!(),
+            Expression::String(_) => todo!(),
+            Expression::Void => todo!(),
+            Expression::GameObject(GameObject { kind: name, .. }) => {
+                Ok(ExpressionKind::GameObject(name.to_string()))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpressionKind {
+    Number,
+    String,
+    Void,
+    GameObject(String),
+
+    MethodCall {
+        arguments: Vec<ExpressionKind>,
+        return_kind: Box<ExpressionKind>,
+    },
+    Array(Box<ExpressionKind>),
+}
+
+pub trait SimpleMethod {
+    fn call(&self, state: &GameState, args: Vec<Expression>)
+        -> Result<Expression, EvaluationError>;
+}
+
+pub trait MethodFunction: SimpleMethod {
     fn clone_boxed(&self) -> Box<dyn MethodFunction>;
 }
 
-impl<F> MethodFunction for F
-where
-    F: FnMut(Vec<Expression>) -> Result<Expression, EvaluationError> + Clone + 'static,
-{
-    fn call(&mut self, args: Vec<Expression>) -> Result<Expression, EvaluationError> {
-        (*self)(args)
-    }
-
+impl<F: Clone + SimpleMethod + 'static> MethodFunction for F {
     fn clone_boxed(&self) -> Box<dyn MethodFunction> {
         Box::new(self.clone())
     }
 }
 
-pub struct GameObject {
-    pub methods: HashMap<String, Box<dyn MethodFunction>>,
+pub struct Method {
+    implementation: Box<dyn MethodFunction>,
+    kind_signature: ExpressionKind,
 }
 
-impl Clone for GameObject {
+impl Clone for Method {
     fn clone(&self) -> Self {
         Self {
-            methods: self
-                .methods
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone_boxed()))
-                .collect(),
+            implementation: self.implementation.clone_boxed(),
+            kind_signature: self.kind_signature.clone(),
         }
     }
+}
+
+impl Method {
+    pub const fn new(function: Box<dyn MethodFunction>, kind_signature: ExpressionKind) -> Method {
+        assert!(matches!(kind_signature, ExpressionKind::MethodCall { .. }));
+
+        Method {
+            implementation: function,
+            kind_signature,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct GameObject {
+    pub kind: String,
+    pub methods: HashMap<String, Method>,
 }
 
 impl std::fmt::Debug for GameObject {
@@ -273,7 +356,10 @@ pub enum EvaluationError {
     #[error("A method was not declared before: {}", .0)]
     MethodNotFound(String),
     #[error("An unexpected type was given for the operation")]
-    InvalidType,
+    InvalidType {
+        expected: ExpressionKind,
+        found: ExpressionKind,
+    },
 }
 
 fn eval_expression(
@@ -321,7 +407,12 @@ fn eval_expression(
 
                     Ok(Expression::Void)
                 }
-                _ => return Err(EvaluationError::InvalidType),
+                expr => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Array(Box::new(ExpressionKind::Void)),
+                        found: expr.get_kind(context)?,
+                    })
+                }
             }
         }
         Expression::Negated(val) => {
@@ -329,7 +420,12 @@ fn eval_expression(
 
             match val {
                 Expression::Number(num) => Ok(Expression::Number(-num)),
-                _ => return Err(EvaluationError::InvalidType),
+                expr => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: expr.get_kind(context)?,
+                    })
+                }
             }
         }
         Expression::Multiply(lhs, rhs) => {
@@ -340,7 +436,18 @@ fn eval_expression(
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_mul(rhs)))
                 }
-                _ => return Err(EvaluationError::InvalidType),
+                (Expression::Number(_), other) | (other, Expression::Number(_)) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
+                (other, _) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
             }
         }
         Expression::Divide(lhs, rhs) => {
@@ -351,7 +458,18 @@ fn eval_expression(
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_div(rhs)))
                 }
-                _ => return Err(EvaluationError::InvalidType),
+                (Expression::Number(_), other) | (other, Expression::Number(_)) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
+                (other, _) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
             }
         }
         Expression::Add(lhs, rhs) => {
@@ -362,7 +480,18 @@ fn eval_expression(
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_add(rhs)))
                 }
-                _ => return Err(EvaluationError::InvalidType),
+                (Expression::Number(_), other) | (other, Expression::Number(_)) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
+                (other, _) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
             }
         }
         Expression::Substract(lhs, rhs) => {
@@ -373,7 +502,18 @@ fn eval_expression(
                 (Expression::Number(lhs), Expression::Number(rhs)) => {
                     Ok(Expression::Number(lhs.saturating_sub(rhs)))
                 }
-                _ => return Err(EvaluationError::InvalidType),
+                (Expression::Number(_), other) | (other, Expression::Number(_)) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
+                (other, _) => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::Number,
+                        found: other.get_kind(context)?,
+                    })
+                }
             }
         }
         Expression::MethodCall {
@@ -388,17 +528,24 @@ fn eval_expression(
 
             let var = context
                 .values
-                .get_mut(&variable)
+                .get(&variable)
                 .ok_or_else(|| EvaluationError::ValueNotFound(variable.to_string()))?;
-            let meth = match var {
+            dbg!(var.get_kind(context)?);
+            dbg!(&method);
+            let method = match var {
                 Expression::GameObject(obj) => obj
                     .methods
-                    .get_mut(&method)
+                    .get(&method)
                     .ok_or_else(|| EvaluationError::MethodNotFound(method.to_string()))?,
-                _ => return Err(EvaluationError::InvalidType),
+                expr => {
+                    return Err(EvaluationError::InvalidType {
+                        expected: ExpressionKind::GameObject(String::from("<any gameobject>")),
+                        found: expr.get_kind(context)?,
+                    })
+                }
             };
 
-            meth.call(arguments)
+            method.implementation.call(arguments)
         }
         expr @ Expression::Number(_)
         | expr @ Expression::GameObject(_)
@@ -437,7 +584,7 @@ mod tests {
     };
     use nom_supreme::ParserExt;
 
-    use crate::game_dsl::parse_statements;
+    use crate::game_dsl::{parse_statements, ExpressionKind, Method, SimpleMethod};
 
     use super::{
         eval_expression, parse_let_variable, EvaluationContext, Expression, GameDsl, GameObject,
@@ -488,12 +635,37 @@ mod tests {
         let val = Rc::new(RefCell::new(Expression::Void));
 
         let final_val = val.clone();
-        let print_method: Box<dyn MethodFunction> = Box::new(move |args: Vec<Expression>| {
-            *val.borrow_mut() = args[0].clone();
-            Ok(Expression::Void)
+        let print_method: Box<dyn MethodFunction> = Box::new({
+            #[derive(Debug, Clone)]
+            struct SimpleBorrow(Rc<RefCell<Expression>>);
+
+            impl SimpleMethod for SimpleBorrow {
+                fn call(
+                    &self,
+                    mut args: Vec<Expression>,
+                ) -> Result<Expression, crate::game_dsl::EvaluationError> {
+                    *self.0.borrow_mut() = args.pop().unwrap();
+
+                    Ok(Expression::Void)
+                }
+            }
+
+            SimpleBorrow(val)
         });
         let game = GameObject {
-            methods: [("print".to_string(), print_method)].into_iter().collect(),
+            kind: "game".to_string(),
+            methods: [(
+                "print".to_string(),
+                Method::new(
+                    print_method,
+                    ExpressionKind::MethodCall {
+                        arguments: vec![ExpressionKind::Number],
+                        return_kind: Box::new(ExpressionKind::Void),
+                    },
+                ),
+            )]
+            .into_iter()
+            .collect(),
         };
 
         let (rest, parsed) = parse_statements(input).finish().unwrap();
