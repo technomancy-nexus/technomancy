@@ -48,9 +48,63 @@
     1. Cleanup Phase
         1. All 'Until end of turn' effects end here.
         1. The active player discards down to hand size.
+1. On each phase the active player gets priority
+    1. Whenever a player chooses not to play a card or activate an ability, they pass priority
+    1. The next player to receive priority is determined by turn order (usually clockwise)
+    1. Whenever a player receives priority, the game first does the following actions:
+        1. Check for all state-based effects, repeat until no effect is applied
+        1. Any triggered effects due to the state based effects go on the stack
+        1. The game repeats until no effect is applied nor any triggered effect is triggered
+    1. Once all players have chosen to pass priority, and the stack is empty
+       the current phase ends and the next phase starts
+    1. Once all players have chosen to pass priorty, and the stack is not
+       empty, the top most card or ability takes its effect
+    1. Once a card or ability has taken effect, the active player receives priority
+    1. Players do not receive priority during the recovery phase
+    1. Players do not receive priority in the cleanup phase unless a triggered
+       ability goes on the stack during it
+1. There exist the following type of cards
+    1. Quickhack
+        1. Quickhacks may be played at anytime that a player has priority
+        1. After being assembled a Quickhack goes into the discard pile.
+    1. Program
+        1. Programs may be played only when the player is the active player and the stack is empty.
+        1. After being assembled a Program goes into the discard pile.
+    1. Agent
+        1. Agents may be played only when the player is the active player and the stack is empty.
+        1. After being assembled an Agent goes onto the battlefield.
+    1. Building
+        1. Buildings may be played only when the player is the active player and the stack is empty.
+        1. Only one building may be played per turn.
+        1. Buildings do not go on the stack and instead directly enter the battlefield.
+1. Whenever the player with priority plays a card, they perform the following actions:
+    1. They declare which card they wish to play
+    1. They determine the energy cost of the card
+        1. They add any additional cost for playing this card
+        1. They substract any potential costs for playing this card
+        1. They may then activate any energy abilities of perpetual cards they control
+        1. This determines the final cost of the card
+    1. The user then pays those costs. If for some reason they can't the
+       playing is aborted and the game goes back to before the casting.
+    1. Once paid, the card goes to the stack
 
 ## 4. Game Actions
 
 1. To 'recover' a card means to untap it, and all 'When ~ recovers' abilities trigger 
     1. Only deployed cards may recover.
         1. Should a recover action target an invalid target, nothing happens.
+
+## 5. Game Structure
+
+1. Every card has a singular unique name
+1. Every card has an energy cost
+    1. A card's 'energy cost' is the sum of all its kinds of energies that exist in its cost
+1. There are five different kinds of energy
+    1. Serial
+    1. Parallel
+    1. Electrical
+    1. Mechanical 
+    1. Technomagic
+1. Agents have two properties: Damage and Health
+    1. An agent whose health is 0 dies and is put into the discard pile.
+    1. Whenever an agent is dealt damage they lose that much health.
