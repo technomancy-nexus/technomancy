@@ -82,7 +82,7 @@
     1. They determine the cred cost of the card
         1. They add any additional cost for playing this card
         1. They substract any potential costs for playing this card
-        1. They may then activate any cred abilities of perpetual cards they control
+        1. They may then activate any cred abilities of battlefield cards you control
         1. This determines the final cost of the card
     1. The user then pays those costs. If for some reason they can't the
        playing is aborted and the game goes back to before the casting.
