@@ -79,10 +79,10 @@
         1. Buildings do not go on the stack and instead directly enter the battlefield.
 1. Whenever the player with priority plays a card, they perform the following actions:
     1. They declare which card they wish to play
-    1. They determine the energy cost of the card
+    1. They determine the cred cost of the card
         1. They add any additional cost for playing this card
         1. They substract any potential costs for playing this card
-        1. They may then activate any energy abilities of perpetual cards they control
+        1. They may then activate any cred abilities of perpetual cards they control
         1. This determines the final cost of the card
     1. The user then pays those costs. If for some reason they can't the
        playing is aborted and the game goes back to before the casting.
@@ -97,14 +97,15 @@
 ## 5. Game Structure
 
 1. Every card has a singular unique name
-1. Every card has an energy cost
-    1. A card's 'energy cost' is the sum of all its kinds of energies that exist in its cost
-1. There are five different kinds of energy
-    1. Serial
-    1. Parallel
-    1. Electrical
-    1. Mechanical 
-    1. Technomagic
+1. Every card has a cred cost
+    1. A card's 'cred cost' is the sum of all its kinds of creds that exist in its cost
+1. There are five different kinds of cred, each issued by the respective megacorp
+    1. CORP1
+    1. CORP2
+    1. CORP3
+    1. CORP4
+    1. CORP5
 1. Agents have two properties: Damage and Health
-    1. An agent whose health is 0 dies and is put into the discard pile.
-    1. Whenever an agent is dealt damage they lose that much health.
+    1. An agent whose health is 0 dies and is put into the discard pile
+    1. Whenever an agent is dealt damage they lose that much health
+    1. An agents maximum health is the health as written on the card
