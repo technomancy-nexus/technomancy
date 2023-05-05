@@ -97,6 +97,11 @@
 ## 5. Game Structure
 
 1. Every card has a singular unique name
+1. A cards owner is the player whose library it started in at the beginning of the game.
+    1. A card created throughout the game is owned by the player that created it.
+1. Every card has none or one or more factions, which are determined by the
+   different kinds of cred that appear in its cost.
+    1. A card without a faction is called 'factionless'
 1. Every card has a cred cost
     1. A card's 'cred cost' is the sum of all its kinds of creds that exist in its cost
 1. There are five different kinds of cred, each issued by the respective megacorp
