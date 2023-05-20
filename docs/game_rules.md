@@ -79,10 +79,10 @@
         1. Buildings do not go on the stack and instead directly enter the battlefield.
 1. Whenever the player with priority plays a card, they perform the following actions:
     1. They declare which card they wish to play
-    1. They determine the cred cost of the card
+    1. They determine the scrip cost of the card
         1. They add any additional cost for playing this card
         1. They substract any potential costs for playing this card
-        1. They may then activate any cred abilities of battlefield cards you control
+        1. They may then activate any scrip abilities of battlefield cards you control
         1. This determines the final cost of the card
     1. The user then pays those costs. If for some reason they can't the
        playing is aborted and the game goes back to before the casting.
@@ -100,11 +100,11 @@
 1. A cards owner is the player whose library it started in at the beginning of the game.
     1. A card created throughout the game is owned by the player that created it.
 1. Every card has none or one or more factions, which are determined by the
-   different kinds of cred that appear in its cost.
+   different kinds of scrip that appear in its cost.
     1. A card without a faction is called 'factionless'
-1. Every card has a cred cost
-    1. A card's 'cred cost' is the sum of all its kinds of creds that exist in its cost
-1. There are five different kinds of cred, each issued by the respective megacorp
+1. Every card has a scrip cost
+    1. A card's 'scrip cost' is the sum of all its kinds of scrips that exist in its cost
+1. There are five different kinds of scrip, each issued by the respective megacorp
     1. CORP1
     1. CORP2
     1. CORP3
@@ -114,3 +114,15 @@
     1. An agent whose health is 0 dies and is put into the discard pile
     1. Whenever an agent is dealt damage they lose that much health
     1. An agents maximum health is the health as written on the card
+
+## 6. Resolving Effects
+
+1. Every card has certain properties. These properties have a unique timestamp
+   of when they are first applied.
+1. Resolving in which order these properties apply is done with the following steps:
+    1. Sort all properties by their timestamp in ascending order. Later timestamps are after earlier.
+    1. Consider all card properties.
+    1. Consider all control effects.
+    1. Consider all alliegence effects.
+    1. Consider all power and health changing properties.
+    1. Consider all other effects.
