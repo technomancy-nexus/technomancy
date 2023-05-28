@@ -32,7 +32,23 @@
 
         tomlInfo = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; };
         inherit (tomlInfo) pname version;
-        src = ./.;
+        src =
+          let
+            markdownFilter = path: _type: !((pkgs.lib.hasSuffix ".md" path) && builtins.baseNameOf path != "README.md");
+            nixFilter = path: _type: !pkgs.lib.hasSuffix ".nix" path;
+            extraFiles = path: _type: !(builtins.any (n: pkgs.lib.hasSuffix n path) [ ".github" ".sh" ]);
+            filterPath = path: type: builtins.all (f: f path type) [
+              markdownFilter
+              nixFilter
+              extraFiles
+              pkgs.lib.cleanSourceFilter
+            ];
+          in
+          pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = filterPath;
+          };
+
 
         cargoArtifacts = craneLib.buildDepsOnly {
           inherit src;
@@ -68,8 +84,7 @@
 
         devShells.default = devShells.technomancy;
         devShells.technomancy = pkgs.mkShell {
-          buildInputs = [
-          ];
+          inputsFrom = [ technomancy ];
 
           nativeBuildInputs = [
             rustTarget

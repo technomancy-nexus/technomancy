@@ -300,7 +300,7 @@ impl Game {
                 }
                 GameAtom::DealDamage {
                     amount,
-                    source,
+                    source: _,
                     target,
                 } => match target {
                     TargetId::Player(ply) => {
