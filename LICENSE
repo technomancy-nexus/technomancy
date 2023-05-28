@@ -1,0 +1,23 @@
+CODE LICENSES
+=============
+
+All program parts written in Rust in this project are licensed under the
+AGPL-v3.0 or later. See LICENSE-AGPL-3.0 for the full text.
+
+Card decks loaded at runtime by technomancy_engine are complex data
+structures read by the library and the larger game engine, and thus form part
+of a combined work based on this library and engine. Thus, the terms and
+conditions of the AGPL cover the whole combination.
+
+As a special exception, the copyright holders of technomancy_engine give you
+permission to load such card decks at runtime, regardless of the licence on the
+decks, without having the provisions of AGPL s13 apply to the card decks. If
+you modify this library, you may extend this exception to your version of the
+library, but you are not obliged to do so. If you do not wish to do so, delete
+this exception statement from your version.
+
+DOCUMENTATION LICENSES
+======================
+
+All documents in the docs/ folder are licensed under the GFDL 1.3 or later. See
+LICENSE-GFDL-1.3 for the full text.
