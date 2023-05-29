@@ -4,14 +4,11 @@ use crate::{GameId, PlayerId};
 
 #[tarpc::service]
 pub trait Outside {
-    async fn get_player_order(game_id: GameId) -> Vec<PlayerId>;
     async fn get_player_keeping(game_id: GameId, asked_players: Vec<PlayerId>) -> Vec<PlayerId>;
 }
 
 #[async_trait::async_trait]
 pub trait OutsideGame {
-    async fn get_player_order(&self) -> Result<Vec<PlayerId>, RpcError>;
-
     async fn get_player_keeping(
         &self,
         asked_players: Vec<PlayerId>,
@@ -25,12 +22,6 @@ pub struct OutsideGameClient {
 
 #[async_trait::async_trait]
 impl OutsideGame for OutsideGameClient {
-    async fn get_player_order(&self) -> Result<Vec<PlayerId>, RpcError> {
-        self.client
-            .get_player_order(get_context(), self.game_id)
-            .await
-    }
-
     async fn get_player_keeping(
         &self,
         asked_players: Vec<PlayerId>,

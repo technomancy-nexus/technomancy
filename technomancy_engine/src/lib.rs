@@ -7,6 +7,7 @@ use rand::{seq::SliceRandom, Fill, Rng};
 use rand_xoshiro::Xoshiro256StarStar;
 use serde::{Deserialize, Serialize};
 use tarpc::client::RpcError;
+use tracing::trace;
 use uuid::Uuid;
 
 pub mod card;
@@ -332,64 +333,78 @@ impl Game {
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(game = ?self.id), err)]
     async fn run(&mut self, outside: &OutsideGameClient) -> Result<(), GameError> {
-        while let GameStage::KeepHand { players_keeping } =
-            self.latest_gamestate().game_stage.clone()
+        if let GameStage::KeepHand { players_keeping } = self.latest_gamestate().game_stage.clone()
         {
-            if players_keeping.len() == self.players.len() {
-                self.apply_atoms(vec![GameAtom::StartGame])?;
-                continue;
-            }
-            let latest_gamestate = self.latest_gamestate();
-            let atoms: Vec<_> = self
-                .players
-                .keys()
-                .filter(|p| !players_keeping.contains(p))
-                .flat_map(|p| {
-                    let hand = latest_gamestate.get_hand(*p);
+            trace!("Checking for potential mulligans");
+            {
+                let latest_gamestate = self.latest_gamestate();
+                let atoms: Vec<_> = self
+                    .players
+                    .keys()
+                    .filter(|p| !players_keeping.contains(p))
+                    .flat_map(|p| {
+                        let hand = latest_gamestate.get_hand(*p);
 
-                    match hand.objects.len() {
-                        count @ 2.. => vec![
-                            GameAtom::ShuffleHandIntoLibrary { player: *p },
-                            GameAtom::DrawCards {
+                        match hand.objects.len() {
+                            1 => vec![
+                                GameAtom::ShuffleHandIntoLibrary { player: *p },
+                                GameAtom::KeepHand { player: *p },
+                            ],
+                            0 => vec![GameAtom::DrawCards {
                                 player: *p,
-                                count: count - 1,
-                            },
-                        ],
-                        1 => vec![
-                            GameAtom::ShuffleHandIntoLibrary { player: *p },
-                            GameAtom::KeepHand { player: *p },
-                        ],
-                        0 => vec![GameAtom::DrawCards {
-                            player: *p,
-                            count: 7,
-                        }],
-                        _ => unreachable!(),
-                    }
-                })
-                .collect();
-            self.apply_atoms(atoms)?;
+                                count: 7,
+                            }],
+                            count => vec![
+                                GameAtom::ShuffleHandIntoLibrary { player: *p },
+                                GameAtom::DrawCards {
+                                    player: *p,
+                                    count: count - 1,
+                                },
+                            ],
+                        }
+                    })
+                    .collect();
+                self.apply_atoms(atoms)?;
+            }
 
-            let latest_gamestate = self.latest_gamestate();
+            {
+                let latest_gamestate = self.latest_gamestate();
 
-            let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
+                let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
                 unreachable!()
             };
 
-            let players = self
-                .players
-                .keys()
-                .filter(|p| !players_keeping.contains(p))
-                .copied()
-                .collect();
-            let players_keeping = outside.get_player_keeping(players).await?;
+                let players_not_kept_yet = self
+                    .players
+                    .keys()
+                    .filter(|p| !players_keeping.contains(p))
+                    .copied()
+                    .collect();
+                let players_keeping = outside.get_player_keeping(players_not_kept_yet).await?;
 
-            self.apply_atoms(
-                players_keeping
-                    .into_iter()
-                    .map(|p| GameAtom::KeepHand { player: p })
-                    .collect(),
-            )?;
+                self.apply_atoms(
+                    players_keeping
+                        .into_iter()
+                        .map(|p| GameAtom::KeepHand { player: p })
+                        .collect(),
+                )?;
+            }
+
+            {
+                let latest_gamestate = self.latest_gamestate();
+
+                let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
+                    unreachable!()
+                };
+
+                if players_keeping.len() == self.players.len() {
+                    trace!("All players have kept, we can start the game");
+                    self.apply_atoms(vec![GameAtom::StartGame])?;
+                    return Ok(());
+                }
+            }
         }
 
         Ok(())
@@ -437,7 +452,7 @@ mod tests {
 
     use rand::{Rng, SeedableRng};
     use rand_xoshiro::Xoshiro256StarStar;
-    use tarpc::server::Channel;
+    use tarpc::{server::Channel, transport::channel::UnboundedChannel, ClientMessage, Response};
 
     use crate::{
         card::{
@@ -499,6 +514,10 @@ mod tests {
             CardId::with(BLAST_CARD),
             CardId::with(BLAST_CARD),
             CardId::with(BLAST_CARD),
+            CardId::with(DRAW_CARD),
+            CardId::with(DRAW_CARD),
+            CardId::with(DRAW_CARD),
+            CardId::with(DRAW_CARD),
         ]
     }
 
@@ -541,18 +560,10 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct OutsideServer(Vec<PlayerId>);
+    struct SimpleOutsideServer;
 
     #[tarpc::server]
-    impl Outside for OutsideServer {
-        async fn get_player_order(
-            self,
-            _context: tarpc::context::Context,
-            _game_id: GameId,
-        ) -> Vec<PlayerId> {
-            self.0
-        }
-
+    impl Outside for SimpleOutsideServer {
         async fn get_player_keeping(
             self,
             _context: tarpc::context::Context,
@@ -568,31 +579,58 @@ mod tests {
         player_order: Vec<PlayerId>,
         game: Game,
         outside_client: OutsideGameClient,
-        outside_server: tokio::task::JoinHandle<()>,
+    }
+
+    fn init_harness(
+        seed: Option<u64>,
+    ) -> (
+        Vec<PlayerId>,
+        Engine,
+        Game,
+        tarpc::transport::channel::UnboundedChannel<
+            tarpc::ClientMessage<OutsideRequest>,
+            tarpc::Response<OutsideResponse>,
+        >,
+        OutsideGameClient,
+    ) {
+        let mut rand = Xoshiro256StarStar::seed_from_u64(seed.unwrap_or(1337));
+        let players = playtesters(&mut rand);
+        let player_order: Vec<_> = players.keys().copied().collect();
+        let engine = new_engine();
+
+        let game = Game::new(rand, players, player_order.clone());
+
+        let (server, outside_client) = outside_client(game.id);
+
+        (player_order, engine, game, server, outside_client)
     }
 
     impl SimpleTestHarness {
         fn new(seed: Option<u64>) -> Self {
-            let mut rand = Xoshiro256StarStar::seed_from_u64(seed.unwrap_or(1337));
-            let players = playtesters(&mut rand);
-            let player_order: Vec<_> = players.keys().copied().collect();
-            let engine = new_engine();
-
-            let game = Game::new(rand, players, player_order.clone());
-
-            let (server, outside_client) = outside_client(game.id);
+            let (harness, server) = Self::new_with_server(seed);
 
             let server = tarpc::server::BaseChannel::with_defaults(server);
-            let outside_server =
-                tokio::spawn(server.execute(OutsideServer(player_order.clone()).serve()));
+            let _outside_server = tokio::spawn(server.execute(SimpleOutsideServer.serve()));
 
-            SimpleTestHarness {
-                engine,
-                player_order,
-                game,
-                outside_client,
-                outside_server,
-            }
+            harness
+        }
+        fn new_with_server(
+            seed: Option<u64>,
+        ) -> (
+            SimpleTestHarness,
+            UnboundedChannel<ClientMessage<OutsideRequest>, Response<OutsideResponse>>,
+        ) {
+            let (player_order, engine, game, server, outside_client) = init_harness(seed);
+
+            (
+                SimpleTestHarness {
+                    engine,
+                    player_order,
+                    game,
+                    outside_client,
+                },
+                server,
+            )
         }
     }
 
@@ -600,6 +638,24 @@ mod tests {
         (async fn $name:ident() $($tt:tt)*) => {
             #[test]
             fn $name() {
+                use tracing_subscriber::layer::SubscriberExt;
+                use tracing_subscriber::util::SubscriberInitExt;
+                use tracing::Instrument;
+
+                let filter = tracing_subscriber::filter::EnvFilter::from_default_env();
+                let fmt_layer = tracing_subscriber::fmt::layer()
+                    .with_timer(tracing_subscriber::fmt::time::uptime())
+                    .with_level(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_test_writer()
+                    .pretty();
+
+                let _ = tracing_subscriber::registry()
+                    .with(filter)
+                    .with(fmt_layer)
+                    .try_init();
+
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -607,7 +663,7 @@ mod tests {
 
                 rt.block_on(async {
                     $($tt)*
-                });
+                }.instrument(tracing::info_span!("Running test", name = stringify!($name))));
 
                 rt.shutdown_background();
             }
@@ -658,6 +714,80 @@ mod tests {
             let state = harness.game.latest_gamestate();
 
             assert_eq!(&state.active_player_order, &harness.player_order);
+        }
+    );
+
+    async_test!(
+        async fn check_game_mulligan() {
+            #[derive(Clone)]
+            struct MulliganServer(std::sync::Arc<tokio::sync::Mutex<Option<PlayerId>>>);
+
+            #[tarpc::server]
+            impl Outside for MulliganServer {
+                async fn get_player_keeping(
+                    self,
+                    _context: tarpc::context::Context,
+                    _game_id: GameId,
+                    asked_players: Vec<PlayerId>,
+                ) -> Vec<PlayerId> {
+                    if let Some(player) = self.0.lock().await.take() {
+                        asked_players.into_iter().filter(|&p| p != player).collect()
+                    } else {
+                        asked_players
+                    }
+                }
+            }
+
+            let (mut harness, server) = SimpleTestHarness::new_with_server(None);
+            let player = harness.player_order.first().unwrap().clone();
+
+            let server = tarpc::server::BaseChannel::with_defaults(server);
+            let _outside_server = tokio::spawn(server.execute(
+                MulliganServer(std::sync::Arc::new(tokio::sync::Mutex::new(Some(player)))).serve(),
+            ));
+
+            harness.game.run(&harness.outside_client).await.unwrap();
+            harness.game.run(&harness.outside_client).await.unwrap();
+
+            let state = harness.game.latest_gamestate();
+            assert!(
+                matches!(state.game_stage, crate::GameStage::GameRunning),
+                "Game is still not running!"
+            );
+            assert_eq!(
+                6,
+                state
+                    .zones
+                    .get(&ZoneId::Hand(player))
+                    .unwrap()
+                    .objects
+                    .len()
+            );
+        }
+    );
+
+    async_test!(
+        async fn check_game_asks_for_player_actions() {
+            #[derive(Clone)]
+            struct InteractiveServer;
+
+            #[tarpc::server]
+            impl Outside for InteractiveServer {
+                async fn get_player_keeping(
+                    self,
+                    _context: tarpc::context::Context,
+                    _game_id: GameId,
+                    asked_players: Vec<PlayerId>,
+                ) -> Vec<PlayerId> {
+                    asked_players
+                }
+            }
+
+            let (mut harness, server) = SimpleTestHarness::new_with_server(None);
+            let server = tarpc::server::BaseChannel::with_defaults(server);
+            let _outside_server = tokio::spawn(server.execute(InteractiveServer {}.serve()));
+
+            harness.game.run(&harness.outside_client).await.unwrap();
         }
     );
 }
