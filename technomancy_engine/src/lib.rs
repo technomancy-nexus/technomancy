@@ -40,6 +40,12 @@ pub fn get_seeded_uuid(rng: &mut impl Rng) -> uuid::Uuid {
     uuid::Builder::from_random_bytes(random_bytes).into_uuid()
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum PlayerAction {
+    PlayCard { object: ObjectId },
+    PassPriority,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(transparent)]
 pub struct PlayerId(Uuid);
@@ -154,6 +160,12 @@ pub enum GameError {
     RPCError(#[from] RpcError),
     #[error("A keep hand atom was generated during normal game running")]
     KeepHandDuringGame,
+    #[error("An invalid action was selected")]
+    InvalidAction,
+    #[error("The expected object could not be found")]
+    ObjectNotFound { object: ObjectId },
+    #[error("A player was marked as passing although they either already passed, or its not their moment to pass")]
+    InvalidPlayerPassing { player: PlayerId },
 }
 
 pub enum VerificationError {
@@ -192,6 +204,14 @@ pub enum GameAtom {
         source: ObjectId,
         target: TargetId,
     },
+    PassPriority {
+        player: PlayerId,
+    },
+    ObjectMoveZone {
+        from: ZoneId,
+        to: ZoneId,
+        object: ObjectId,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -213,12 +233,19 @@ pub enum GameStage {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GameState {
     zones: hashbrown::HashMap<ZoneId, GameZone>,
+    /// The turn order, index 0 is the active player
     active_player_order: Vec<PlayerId>,
+    /// Players who have not yet passed since the last stack-modifying action
+    unpassed_player: Vec<PlayerId>,
     game_stage: GameStage,
 }
 impl GameState {
     fn get_hand(&self, p: PlayerId) -> &GameZone {
         self.zones.get(&ZoneId::Hand(p)).unwrap()
+    }
+
+    fn get_stack(&self) -> &GameZone {
+        self.zones.get(&ZoneId::Stack).unwrap()
     }
 }
 
@@ -327,6 +354,22 @@ impl Game {
                     let new_count = library.objects.len().saturating_sub(count);
                     hand.objects.extend(library.objects.drain(new_count..));
                 }
+                GameAtom::PassPriority { player } => {
+                    if next_state.unpassed_player.first() == Some(&player) {
+                        next_state.unpassed_player.pop();
+                    } else {
+                        return Err(GameError::InvalidPlayerPassing { player });
+                    }
+                }
+                GameAtom::ObjectMoveZone { from, to, object } => {
+                    let Some([from, to]) = next_state.zones.get_many_mut([&from, &to]) else { unreachable!() };
+                    if let Some(obj_idx) = from.objects.iter().position(|o| o.id == object) {
+                        let obj = from.objects.remove(obj_idx);
+                        to.objects.push(obj);
+                    } else {
+                        return Err(GameError::ObjectNotFound { object });
+                    }
+                }
             }
         }
         self.game_states.push(next_state);
@@ -335,74 +378,118 @@ impl Game {
 
     #[tracing::instrument(level = "trace", skip_all, fields(game = ?self.id), err)]
     async fn run(&mut self, outside: &OutsideGameClient) -> Result<(), GameError> {
-        if let GameStage::KeepHand { players_keeping } = self.latest_gamestate().game_stage.clone()
-        {
-            trace!("Checking for potential mulligans");
-            {
-                let latest_gamestate = self.latest_gamestate();
-                let atoms: Vec<_> = self
-                    .players
-                    .keys()
-                    .filter(|p| !players_keeping.contains(p))
-                    .flat_map(|p| {
-                        let hand = latest_gamestate.get_hand(*p);
+        match self.latest_gamestate().game_stage.clone() {
+            GameStage::KeepHand { players_keeping } => {
+                trace!("Checking for potential mulligans");
+                {
+                    let latest_gamestate = self.latest_gamestate();
+                    let atoms: Vec<_> = self
+                        .players
+                        .keys()
+                        .filter(|p| !players_keeping.contains(p))
+                        .flat_map(|p| {
+                            let hand = latest_gamestate.get_hand(*p);
 
-                        match hand.objects.len() {
-                            1 => vec![
-                                GameAtom::ShuffleHandIntoLibrary { player: *p },
-                                GameAtom::KeepHand { player: *p },
-                            ],
-                            0 => vec![GameAtom::DrawCards {
-                                player: *p,
-                                count: 7,
-                            }],
-                            count => vec![
-                                GameAtom::ShuffleHandIntoLibrary { player: *p },
-                                GameAtom::DrawCards {
+                            match hand.objects.len() {
+                                1 => vec![
+                                    GameAtom::ShuffleHandIntoLibrary { player: *p },
+                                    GameAtom::KeepHand { player: *p },
+                                ],
+                                0 => vec![GameAtom::DrawCards {
                                     player: *p,
-                                    count: count - 1,
-                                },
-                            ],
-                        }
-                    })
-                    .collect();
-                self.apply_atoms(atoms)?;
-            }
+                                    count: 7,
+                                }],
+                                count => vec![
+                                    GameAtom::ShuffleHandIntoLibrary { player: *p },
+                                    GameAtom::DrawCards {
+                                        player: *p,
+                                        count: count - 1,
+                                    },
+                                ],
+                            }
+                        })
+                        .collect();
+                    self.apply_atoms(atoms)?;
+                }
 
-            {
-                let latest_gamestate = self.latest_gamestate();
+                {
+                    let latest_gamestate = self.latest_gamestate();
 
-                let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
-                unreachable!()
-            };
-
-                let players_not_kept_yet = self
-                    .players
-                    .keys()
-                    .filter(|p| !players_keeping.contains(p))
-                    .copied()
-                    .collect();
-                let players_keeping = outside.get_player_keeping(players_not_kept_yet).await?;
-
-                self.apply_atoms(
-                    players_keeping
-                        .into_iter()
-                        .map(|p| GameAtom::KeepHand { player: p })
-                        .collect(),
-                )?;
-            }
-
-            {
-                let latest_gamestate = self.latest_gamestate();
-
-                let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
+                    let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
                     unreachable!()
                 };
 
-                if players_keeping.len() == self.players.len() {
-                    trace!("All players have kept, we can start the game");
-                    self.apply_atoms(vec![GameAtom::StartGame])?;
-                    return Ok(());
+                    let players_not_kept_yet = self
+                        .players
+                        .keys()
+                        .filter(|p| !players_keeping.contains(p))
+                        .copied()
+                        .collect();
+                    let players_keeping = outside.get_player_keeping(players_not_kept_yet).await?;
+
+                    self.apply_atoms(
+                        players_keeping
+                            .into_iter()
+                            .map(|p| GameAtom::KeepHand { player: p })
+                            .collect(),
+                    )?;
+                }
+
+                {
+                    let latest_gamestate = self.latest_gamestate();
+
+                    let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
+                        unreachable!()
+                    };
+
+                    if players_keeping.len() == self.players.len() {
+                        trace!("All players have kept, we can start the game");
+                        self.apply_atoms(vec![GameAtom::StartGame])?;
+                        return Ok(());
+                    }
+                }
+            }
+            GameStage::GameRunning => {
+                let latest_gamestate = self.latest_gamestate();
+
+                let stack = latest_gamestate.get_stack();
+
+                if stack.objects.is_empty() {
+                    let active_player = latest_gamestate.active_player_order.first().unwrap();
+
+                    let mut possible_actions = vec![PlayerAction::PassPriority];
+                    possible_actions.extend(
+                        latest_gamestate
+                            .get_hand(*active_player)
+                            .objects
+                            .iter()
+                            .map(|hand_obj| PlayerAction::PlayCard {
+                                object: hand_obj.id,
+                            }),
+                    );
+                    let action_idx = outside
+                        .get_next_player_action_from(possible_actions.clone())
+                        .await?;
+
+                    let Some(action) = possible_actions.get(action_idx) else {
+                        return Err(GameError::InvalidAction);
+                    };
+
+                    let mut atoms = vec![];
+                    match action {
+                        PlayerAction::PassPriority => atoms.push(GameAtom::PassPriority {
+                            player: *active_player,
+                        }),
+                        PlayerAction::PlayCard { object } => {
+                            atoms.extend([GameAtom::ObjectMoveZone {
+                                from: ZoneId::Hand(*active_player),
+                                to: ZoneId::Stack,
+                                object: *object,
+                            }])
+                        }
+                    }
+                } else {
+                    todo!()
                 }
             }
         }
@@ -421,6 +508,7 @@ fn new_game_state_with(
             players_keeping: Default::default(),
         },
         active_player_order: order.to_vec(),
+        unpassed_player: order.to_vec(),
         zones: players
             .values()
             .flat_map(|p| {
@@ -768,6 +856,31 @@ mod tests {
 
     async_test!(
         async fn check_game_asks_for_player_actions() {
+            #[derive(Clone)]
+            struct InteractiveServer;
+
+            #[tarpc::server]
+            impl Outside for InteractiveServer {
+                async fn get_player_keeping(
+                    self,
+                    _context: tarpc::context::Context,
+                    _game_id: GameId,
+                    asked_players: Vec<PlayerId>,
+                ) -> Vec<PlayerId> {
+                    asked_players
+                }
+            }
+
+            let (mut harness, server) = SimpleTestHarness::new_with_server(None);
+            let server = tarpc::server::BaseChannel::with_defaults(server);
+            let _outside_server = tokio::spawn(server.execute(InteractiveServer {}.serve()));
+
+            harness.game.run(&harness.outside_client).await.unwrap();
+        }
+    );
+
+    async_test!(
+        async fn check_game_player_plays_card() {
             #[derive(Clone)]
             struct InteractiveServer;
 
