@@ -477,7 +477,7 @@ impl Game {
 
                 let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
                     unreachable!()
-                    };
+                };
 
                 let players_not_kept_yet = self
                     .players
