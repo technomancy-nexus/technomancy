@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::effect::{Effect, EffectTrigger};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Cost {
     pub corp1_scrip: u64,
     pub corp2_scrip: u64,
@@ -13,26 +13,32 @@ pub struct Cost {
     pub any_scrip: u64,
 }
 
+#[derive(Debug)]
 pub struct CardKind {
     pub kind: BaseCardKind,
 }
 
+#[derive(Debug)]
 pub enum AgentSubKind {
     Mercenary,
 }
 
+#[derive(Debug)]
 pub enum BuildingSubKind {}
 
+#[derive(Debug)]
 pub enum AgentPower {
     Fixed(u64),
     Special,
 }
 
+#[derive(Debug)]
 pub enum AgentToughness {
     Fixed(u64),
     Special,
 }
 
+#[derive(Debug)]
 pub enum BaseCardKind {
     Agent {
         subkind: AgentSubKind,
@@ -46,26 +52,31 @@ pub enum BaseCardKind {
     Program,
 }
 
+#[derive(Debug)]
 pub struct TriggeredCardEffect {
     pub trigger: EffectTrigger,
-    pub effect: Vec<Effect>,
+    pub effects: Vec<Effect>,
 }
 
+#[derive(Debug)]
 pub struct ActivatedCardEffect {
     pub cost: Cost,
     pub effect: Vec<Effect>,
 }
 
+#[derive(Debug)]
 pub struct StaticCardEffect {
     pub effect: Effect,
 }
 
+#[derive(Debug)]
 pub enum CardEffect {
     Triggered(TriggeredCardEffect),
     Activated(ActivatedCardEffect),
     Static(StaticCardEffect),
 }
 
+#[derive(Debug)]
 pub struct CardBehaviour {
     pub cost: Option<Cost>,
     pub kind: Vec<CardKind>,
@@ -82,6 +93,7 @@ impl CardId {
     }
 }
 
+#[derive(Debug)]
 pub struct Card {
     pub id: CardId,
     pub behaviour: CardBehaviour,
@@ -127,7 +139,7 @@ mod tests {
                 }],
                 effects: vec![CardEffect::Triggered(TriggeredCardEffect {
                     trigger: EffectTrigger::OnSelfCast,
-                    effect: vec![Effect::Instant(Box::new(DealDamage(3)))],
+                    effects: vec![Effect::Instant(Box::new(DealDamage(3)))],
                 })],
             },
         };

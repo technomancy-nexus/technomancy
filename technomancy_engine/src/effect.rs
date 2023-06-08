@@ -1,31 +1,40 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
+
+use serde::{Deserialize, Serialize};
 
 use crate::{Game, GameAtom, ObjectId, TargetId};
 
+#[derive(Debug)]
 pub enum EffectTrigger {
     OnSelfCast,
 }
 
+#[derive(Debug)]
 pub enum Effect {
     Instant(Box<dyn InstantEffect>),
     Continuous(ContinuousEffect),
 }
 
+#[derive(Debug)]
 pub enum EffectInfoRequest {
     SingleTarget { restriction: Option<()> },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum EffectInfo {
     SingleTarget(TargetId),
 }
 
+#[derive(Debug, thiserror::Error)]
 pub enum ExecuteFailure {
+    #[error("An invalid effect info was given for {}", .name)]
     InvalidEffectInfo { name: String },
+    #[error("No controller was found for effect")]
     NoControllerFound,
 }
 
 #[async_trait::async_trait]
-pub trait InstantEffect {
+pub trait InstantEffect: Debug + Sync + Send {
     fn get_required_info(&self) -> HashMap<String, EffectInfoRequest>;
 
     async fn execute(
@@ -36,6 +45,7 @@ pub trait InstantEffect {
     ) -> Result<Vec<GameAtom>, ExecuteFailure>;
 }
 
+#[derive(Debug)]
 pub enum ContinuousEffect {}
 
 #[cfg(test)]
@@ -46,6 +56,7 @@ pub mod tests {
 
     use super::{EffectInfo, EffectInfoRequest, ExecuteFailure, InstantEffect};
 
+    #[derive(Debug)]
     pub struct DealDamage(pub usize);
 
     #[async_trait::async_trait]
@@ -77,6 +88,7 @@ pub mod tests {
     }
 
     /// For effects that say "You draw X cards"
+    #[derive(Debug)]
     pub struct DrawCards(pub usize);
 
     #[async_trait::async_trait]
