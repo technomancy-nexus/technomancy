@@ -1,3 +1,5 @@
+use std::time::{Duration, SystemTime};
+
 use tarpc::client::RpcError;
 
 use crate::{GameId, ObjectId, PlayerAction, PlayerId, TargetId};
@@ -89,6 +91,14 @@ impl OutsideGame for OutsideGameClient {
     }
 }
 
+#[cfg(test)]
+const TIMEOUT: Duration = Duration::from_millis(100);
+
+#[cfg(not(test))]
+const TIMEOUT: Duration = Duration::from_secs(60 * 60 * 24);
+
 fn get_context() -> tarpc::context::Context {
-    tarpc::context::current()
+    let mut ctx = tarpc::context::current();
+    ctx.deadline = SystemTime::now() + TIMEOUT;
+    ctx
 }

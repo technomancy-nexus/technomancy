@@ -1000,7 +1000,7 @@ mod tests {
         (@step_game $harness:ident) => {
             $harness.game.run(&$harness.outside_client).await.unwrap();
         };
-        (@run $harness:ident { $($normal:tt)* }) => {
+        (@run $harness:ident $($normal:tt)*) => {
             $($normal)*
         };
         ($harness:ident, [ $(@$kind:tt { $($val:tt)* };)+ ]) => {
@@ -1149,19 +1149,6 @@ mod tests {
     );
 
     async_test!(
-        async fn check_game_asks_for_player_actions() {
-            let mut harness = SimpleTestHarness::new(
-                None,
-                ServerAnswers {
-                    ..Default::default()
-                },
-            );
-
-            harness.game.run(&harness.outside_client).await.unwrap();
-        }
-    );
-
-    async_test!(
         async fn check_game_player_plays_card() {
             let mut harness = SimpleTestHarness::new(
                 None,
@@ -1170,7 +1157,15 @@ mod tests {
                 },
             );
 
-            harness.game.run(&harness.outside_client).await.unwrap();
+            game_steps!(
+                harness,
+                [
+                    @step_game {};
+                    @run {
+                        assert!(matches!(harness.game.latest_gamestate().game_stage, crate::GameStage::GameRunning));
+                    };
+                ]
+            );
         }
     );
 }
