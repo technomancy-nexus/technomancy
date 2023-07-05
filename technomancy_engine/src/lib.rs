@@ -186,6 +186,8 @@ pub enum GameError {
         #[source]
         failure: ExecuteFailure,
     },
+    #[error("A given card was not implemented correctly")]
+    InvalidCardState,
 }
 
 pub enum VerificationError {
@@ -566,6 +568,8 @@ impl Game {
                             }];
                             self.apply_atoms(atoms)?;
 
+                            // Step 2
+
                             let latest_gamestate = self.latest_gamestate();
 
                             let active_player =
@@ -598,12 +602,12 @@ impl Game {
                                 })
                                 .flatten();
 
-                            // Step 2
-
                             let mut gathered_info = HashMap::new();
                             for (idx, e) in self_cast_effects.enumerate() {
                                 match e {
-                                    effect::Effect::Continuous(_) => todo!(),
+                                    effect::Effect::Continuous(_) => {
+                                        return Err(GameError::InvalidCardState)
+                                    }
                                     effect::Effect::Instant(instant) => {
                                         let required_info = instant.get_required_info();
                                         for (name, question) in required_info {
@@ -674,7 +678,6 @@ impl Game {
                                 }
                             }
                             // Step 3
-
                             // Step 4
 
                             // Step 5
