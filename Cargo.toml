@@ -1,7 +1,28 @@
-[workspace]
-
-members = ["technomancy_engine"]
-
-[workspace.package]
+[package]
+name = "technomancy_engine"
 version = "0.1.0"
 edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1.68"
+futures = "0.3.28"
+hashbrown = { version = "0.13.2", features = ["serde"] }
+rand = "0.8.5"
+rand_xoshiro = { version = "0.6.0", features = ["serde", "serde1"] }
+serde = { version = "1.0.163", features = ["derive"] }
+tarpc = { version = "0.33.0", features = ["tokio1"] }
+thiserror = "1.0.40"
+tokio = { version = "1.28.1", features = [
+    "tokio-macros",
+    "rt-multi-thread",
+    "rt",
+    "sync",
+    "macros",
+] }
+tracing = "0.1.37"
+uuid = { version = "1.3.2", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
