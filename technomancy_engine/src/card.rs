@@ -138,7 +138,7 @@ mod tests {
                     kind: super::BaseCardKind::Quickhack,
                 }],
                 effects: vec![CardEffect::Triggered(TriggeredCardEffect {
-                    trigger: EffectTrigger::OnSelfPlay,
+                    trigger: EffectTrigger::OnResolve,
                     effects: vec![Effect::Instant(Box::new(DealDamage(3)))],
                 })],
             },

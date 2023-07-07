@@ -184,7 +184,7 @@ pub enum GameError {
     CardNotFound { card: CardId },
     #[error("A response was given with more or less than the required amount")]
     InvalidChoiceAmount { expected: usize, received: usize },
-    #[error("A response was given with more or less than the required amount")]
+    #[error("An effect failed to execute")]
     EffectExecuteFailure {
         #[source]
         failure: ExecuteFailure,
@@ -233,10 +233,13 @@ pub enum GameAtom {
         player: PlayerId,
     },
     PlayerPlayCard {
+        player: PlayerId,
         from: ZoneId,
         object: ObjectId,
         choices: HashMap<(usize, String), EffectInfo>,
     },
+    ResetPriority,
+    PopStack,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -394,12 +397,13 @@ impl Game {
                 }
                 GameAtom::PassPriority { player } => {
                     if next_state.unpassed_players.first() == Some(&player) {
-                        next_state.unpassed_players.pop();
+                        next_state.unpassed_players.remove(0);
                     } else {
                         return Err(GameError::InvalidPlayerPassing { player });
                     }
                 }
                 GameAtom::PlayerPlayCard {
+                    player,
                     from,
                     object,
                     choices,
@@ -409,6 +413,7 @@ impl Game {
                     if let Some(obj_idx) = from.objects.iter().position(|o| o.id == object) {
                         let mut obj = from.objects.remove(obj_idx);
                         obj.choices = choices;
+                        obj.controller = Some(player);
                         to.objects.push(obj);
                     } else {
                         return Err(GameError::ObjectNotFoundInZone {
@@ -416,6 +421,17 @@ impl Game {
                             object,
                         });
                     }
+                }
+                GameAtom::ResetPriority => {
+                    next_state.unpassed_players = next_state.active_player_order.clone();
+                }
+                GameAtom::PopStack => {
+                    next_state
+                        .zones
+                        .get_mut(&ZoneId::Stack)
+                        .unwrap()
+                        .objects
+                        .pop();
                 }
             }
         }
@@ -495,8 +511,65 @@ impl Game {
 
                 let stack = latest_gamestate.get_stack();
 
-                if stack.objects.is_empty() {
-                    let active_player = latest_gamestate.active_player_order.first().unwrap();
+                if latest_gamestate.unpassed_players.is_empty() {
+                    // All players passed, resolve the top most stack item
+                    trace!("All players passed");
+
+                    if let Some(top_item) = stack.objects.last() {
+                        // Resolve!
+                        trace!(?top_item.id, "Attemption resolution");
+                        let card = top_item.underlying_card.as_ref().ok_or(
+                            GameError::NoUnderlyingCard {
+                                object: top_item.id,
+                            },
+                        )?;
+
+                        let card = self
+                            .cards
+                            .get(card)
+                            .ok_or(GameError::CardNotFound { card: *card })?;
+
+                        let resolve_effects = card
+                            .behaviour
+                            .effects
+                            .iter()
+                            .filter_map(|e| match e {
+                                card::CardEffect::Triggered(TriggeredCardEffect {
+                                    trigger: effect::EffectTrigger::OnResolve,
+                                    effects,
+                                }) => Some(effects),
+                                _ => None,
+                            })
+                            .flatten();
+
+                        let mut atoms = vec![];
+                        for (idx, effect) in resolve_effects.enumerate() {
+                            if let effect::Effect::Instant(eff) = effect {
+                                let info = top_item
+                                    .choices
+                                    .iter()
+                                    .filter(|((i, _), _)| *i == idx)
+                                    .map(|((_, k), v)| (k.clone(), v.clone()))
+                                    .collect();
+
+                                let effect_atoms = eff
+                                    .execute(info, top_item.id, self)
+                                    .await
+                                    .map_err(|e| GameError::EffectExecuteFailure { failure: e })?;
+                                atoms.extend(effect_atoms);
+                            }
+                        }
+
+                        atoms.push(GameAtom::PopStack);
+                        atoms.push(GameAtom::ResetPriority);
+
+                        self.apply_atoms(atoms)?;
+                    } else {
+                        // Pass phases/turns
+                        todo!()
+                    }
+                } else {
+                    let active_player = latest_gamestate.unpassed_players.first().unwrap();
 
                     let mut possible_actions = vec![PlayerAction::PassPriority];
                     possible_actions.extend(
@@ -563,13 +636,13 @@ impl Game {
                                 .get(card)
                                 .ok_or(GameError::CardNotFound { card: *card })?;
 
-                            let self_play_effects = card
+                            let resolve_effects = card
                                 .behaviour
                                 .effects
                                 .iter()
                                 .filter_map(|e| match e {
                                     card::CardEffect::Triggered(TriggeredCardEffect {
-                                        trigger: effect::EffectTrigger::OnSelfPlay,
+                                        trigger: effect::EffectTrigger::OnResolve,
                                         effects,
                                     }) => Some(effects),
                                     _ => None,
@@ -577,7 +650,7 @@ impl Game {
                                 .flatten();
 
                             let mut gathered_info = HashMap::new();
-                            for (idx, e) in self_play_effects.enumerate() {
+                            for (idx, e) in resolve_effects.enumerate() {
                                 match e {
                                     effect::Effect::Continuous(_) => {
                                         return Err(GameError::InvalidCardState)
@@ -657,16 +730,20 @@ impl Game {
                             // Pay costs
                             // Step 5
 
-                            let atoms = vec![GameAtom::PlayerPlayCard {
+                            let player_passing = outside.get_player_passing(*active_player).await?;
+
+                            let mut atoms = vec![GameAtom::PlayerPlayCard {
+                                player: *active_player,
                                 from: *from,
                                 object: *object,
                                 choices: gathered_info,
                             }];
+                            atoms.extend(player_passing.then_some(GameAtom::PassPriority {
+                                player: *active_player,
+                            }));
                             self.apply_atoms(atoms)?;
                         }
                     }
-                } else {
-                    todo!()
                 }
             }
         }
@@ -750,7 +827,7 @@ mod tests {
                     kind: BaseCardKind::Quickhack,
                 }],
                 effects: vec![CardEffect::Triggered(TriggeredCardEffect {
-                    trigger: EffectTrigger::OnSelfPlay,
+                    trigger: EffectTrigger::OnResolve,
                     effects: vec![Effect::Instant(Box::new(DealDamage(3)))],
                 })],
             },
@@ -767,7 +844,7 @@ mod tests {
                     kind: BaseCardKind::Quickhack,
                 }],
                 effects: vec![CardEffect::Triggered(TriggeredCardEffect {
-                    trigger: EffectTrigger::OnSelfPlay,
+                    trigger: EffectTrigger::OnResolve,
                     effects: vec![Effect::Instant(Box::new(DrawCards(3)))],
                 })],
             },
@@ -834,6 +911,7 @@ mod tests {
         get_target_choices_from_given: Option<
             Box<dyn FnMut(PlayerId, ObjectId, String, Vec<TargetId>, usize) -> Vec<usize> + Send>,
         >,
+        get_player_passing: Option<Box<dyn FnMut(PlayerId) -> bool + Send>>,
     }
 
     impl Default for ServerAnswers {
@@ -842,6 +920,7 @@ mod tests {
                 get_player_keeping: Some(Box::new(|players| players)),
                 get_next_player_action_from: Default::default(),
                 get_target_choices_from_given: Default::default(),
+                get_player_passing: Default::default(),
             }
         }
     }
@@ -900,6 +979,20 @@ mod tests {
                 .expect("No method set: get_target_choices_from_given")(
                 player, source, name, choices, count,
             )
+        }
+
+        async fn get_player_passing(
+            self,
+            _context: tarpc::context::Context,
+            _game_id: GameId,
+            player: PlayerId,
+        ) -> bool {
+            self.answers
+                .lock()
+                .await
+                .get_player_passing
+                .as_mut()
+                .expect("No method set: get_player_passing")(player)
         }
     }
 
@@ -976,6 +1069,9 @@ mod tests {
     macro_rules! game_steps {
         (@set $harness:ident $action:ident = $($func:tt)*) => {
             $harness.answers.lock().await.$action = Some(Box::new($($func)*));
+        };
+        (@unset $harness:ident) => {
+            *$harness.answers.lock().await = ServerAnswers::default();
         };
         (@step_game $harness:ident) => {
             $harness.game.run(&$harness.outside_client).await.unwrap();
@@ -1137,6 +1233,8 @@ mod tests {
                 },
             );
 
+            let player = *harness.player_order.first().unwrap();
+
             game_steps!(
                 harness,
                 [
@@ -1163,12 +1261,28 @@ mod tests {
                             choices.iter().enumerate().filter(|(_, c)| match c { TargetId::Player(ply) => *ply != player, _ => false }).map(|(idx, _c)| idx).collect()
                         }
                     };
+                    @set {
+                        get_player_passing = |_player: PlayerId| { true }
+                    };
                     @step_game {};
                     @run {
                         let state = harness.game.latest_gamestate();
                         assert_eq!(state.get_stack().objects.len(), 1);
                     };
-
+                    @unset {};
+                    @set {
+                        get_next_player_action_from = |_player, _player_actions| {
+                            0
+                        }
+                    };
+                    @step_game {};
+                    @step_game {};
+                    @step_game {};
+                    @step_game {};
+                    @run {
+                        let state = harness.game.latest_gamestate();
+                        assert_eq!(state.get_hand(player).objects.len(), 7);
+                    };
                 ]
             );
         }

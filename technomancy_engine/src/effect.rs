@@ -9,7 +9,7 @@ pub enum EffectTrigger {
     /// These are the 'main' card effects. This is only useful on cards played onto the stack.
     ///
     /// For cards staying on the battlefield this is for example usually empty.
-    OnSelfPlay,
+    OnResolve,
     /// This effect triggers whenever a card is played onto the stack
     OnPlay,
     /// This effect triggers whenever a player draws a card

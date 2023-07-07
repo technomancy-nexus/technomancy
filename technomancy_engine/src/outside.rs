@@ -20,6 +20,7 @@ pub trait Outside {
         choices: Vec<TargetId>,
         count: usize,
     ) -> Vec<usize>;
+    async fn get_player_passing(game_id: GameId, player: PlayerId) -> bool;
 }
 
 #[async_trait::async_trait]
@@ -41,6 +42,7 @@ pub trait OutsideGame {
         choices: Vec<TargetId>,
         count: usize,
     ) -> Result<Vec<usize>, RpcError>;
+    async fn get_player_passing(&self, player: PlayerId) -> Result<bool, RpcError>;
 }
 
 pub struct OutsideGameClient {
@@ -87,6 +89,12 @@ impl OutsideGame for OutsideGameClient {
                 choices,
                 count,
             )
+            .await
+    }
+
+    async fn get_player_passing(&self, player: PlayerId) -> Result<bool, RpcError> {
+        self.client
+            .get_player_passing(get_context(), self.game_id, player)
             .await
     }
 }
