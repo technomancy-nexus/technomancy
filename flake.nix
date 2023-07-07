@@ -1,5 +1,5 @@
 {
-  description = "The Technomancy game project";
+  description = "The Technomancy engine game project";
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-22.05";
     flake-utils = {
@@ -51,7 +51,7 @@
 
         commonArgs = {
           inherit src;
-          pname = "technomancy";
+          pname = "technomancy_engine";
         };
 
 
@@ -66,12 +66,12 @@
         checks = {
           inherit technomancy-engine;
 
-          technomancy-clippy = craneLib.cargoClippy (commonArgs // {
+          technomancy-engine-clippy = craneLib.cargoClippy (commonArgs // {
             inherit cargoArtifacts;
             cargoClippyExtraArgs = "-- --deny warnings";
           });
 
-          technomancy-fmt = craneLib.cargoFmt (commonArgs // { });
+          technomancy-engine-fmt = craneLib.cargoFmt (commonArgs // { });
         };
 
         packages.technomancy-engine = technomancy-engine;
