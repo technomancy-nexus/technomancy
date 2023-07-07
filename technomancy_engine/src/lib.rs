@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::too_many_arguments)]
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
