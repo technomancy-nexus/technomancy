@@ -89,6 +89,8 @@
 
           nativeBuildInputs = [
             rustTarget
+            pkgs.bacon
+            pkgs.nodePackages.mermaid-cli
           ];
         };
       }

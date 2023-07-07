@@ -6,7 +6,16 @@ use crate::{Game, GameAtom, ObjectId, TargetId};
 
 #[derive(Debug)]
 pub enum EffectTrigger {
-    OnSelfCast,
+    /// These are the 'main' card effects. This is only useful on cards played onto the stack.
+    ///
+    /// For cards staying on the battlefield this is for example usually empty.
+    OnSelfPlay,
+    /// This effect triggers whenever a card is played onto the stack
+    OnPlay,
+    /// This effect triggers whenever a player draws a card
+    ///
+    /// Note: This does not trigger when something 'moves' between zones.
+    OnDraw,
 }
 
 #[derive(Debug)]

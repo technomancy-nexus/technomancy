@@ -170,9 +170,12 @@ pub enum GameError {
     #[error("A keep hand atom was generated during normal game running")]
     KeepHandDuringGame,
     #[error("An invalid action was selected")]
-    InvalidAction,
-    #[error("The expected object could not be found")]
-    ObjectNotFound { object: ObjectId },
+    InvalidAction {
+        list_length: usize,
+        selected_action: usize,
+    },
+    #[error("The expected object ({object:?}) could not be found in {zone:?}")]
+    ObjectNotFoundInZone { zone: ZoneId, object: ObjectId },
     #[error("A player was marked as passing although they either already passed, or its not their moment to pass")]
     InvalidPlayerPassing { player: PlayerId },
     #[error("An object was expected to contain an underlying card, but it did not")]
@@ -232,14 +235,8 @@ pub enum GameAtom {
     PlayerPlayCard {
         from: ZoneId,
         object: ObjectId,
-        stack_id: ObjectId,
-    },
-    AttachChoicesTo {
-        zone: ZoneId,
-        object: ObjectId,
         choices: HashMap<(usize, String), EffectInfo>,
     },
-    PlayerFinishPlayingCard,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -405,35 +402,20 @@ impl Game {
                 GameAtom::PlayerPlayCard {
                     from,
                     object,
-                    stack_id,
+                    choices,
                 } => {
+                    let from_id = from;
                     let Some([from, to]) = next_state.zones.get_many_mut([&from, &ZoneId::Stack]) else { unreachable!() };
                     if let Some(obj_idx) = from.objects.iter().position(|o| o.id == object) {
                         let mut obj = from.objects.remove(obj_idx);
-                        obj.id = stack_id;
+                        obj.choices = choices;
                         to.objects.push(obj);
                     } else {
-                        return Err(GameError::ObjectNotFound { object });
+                        return Err(GameError::ObjectNotFoundInZone {
+                            zone: from_id,
+                            object,
+                        });
                     }
-                }
-                GameAtom::AttachChoicesTo {
-                    zone,
-                    object,
-                    choices,
-                } => {
-                    let object = next_state
-                        .zones
-                        .get_mut(&zone)
-                        .unwrap()
-                        .objects
-                        .iter_mut()
-                        .find(|o| o.id == object)
-                        .ok_or_else(|| GameError::ObjectNotFound { object })?;
-
-                    object.choices.extend(choices);
-                }
-                GameAtom::PlayerFinishPlayingCard => {
-                    next_state.unpassed_players = next_state.active_player_order.clone();
                 }
             }
         }
@@ -532,8 +514,10 @@ impl Game {
                         .await?;
 
                     let Some(action) = possible_actions.get(action_idx) else {
-                        return Err(GameError::InvalidAction);
+                        return Err(GameError::InvalidAction { list_length: possible_actions.len(), selected_action: action_idx });
                     };
+
+                    trace!(?action, "Player selected action");
 
                     match action {
                         PlayerAction::PassPriority => {
@@ -555,19 +539,6 @@ impl Game {
                             // 5. Attach the info to the stack object
                             // 6. Done playing the card, resume normal game
 
-                            // Step 1
-
-                            let stack_id;
-                            let atoms = vec![GameAtom::PlayerPlayCard {
-                                from: ZoneId::Hand(*active_player),
-                                object: *object,
-                                stack_id: {
-                                    stack_id = ObjectId::new(&mut self.rand);
-                                    stack_id
-                                },
-                            }];
-                            self.apply_atoms(atoms)?;
-
                             // Step 2
 
                             let latest_gamestate = self.latest_gamestate();
@@ -577,25 +548,28 @@ impl Game {
 
                             let obj = latest_gamestate
                                 .get_object_from_zone(*from, *object)
-                                .ok_or_else(|| GameError::InvalidAction)?;
+                                .ok_or(GameError::ObjectNotFoundInZone {
+                                    zone: *from,
+                                    object: *object,
+                                })?;
 
                             let card = obj
                                 .underlying_card
                                 .as_ref()
-                                .ok_or_else(|| GameError::NoUnderlyingCard { object: *object })?;
+                                .ok_or(GameError::NoUnderlyingCard { object: *object })?;
 
                             let card = self
                                 .cards
                                 .get(card)
-                                .ok_or_else(|| GameError::CardNotFound { card: *card })?;
+                                .ok_or(GameError::CardNotFound { card: *card })?;
 
-                            let self_cast_effects = card
+                            let self_play_effects = card
                                 .behaviour
                                 .effects
                                 .iter()
                                 .filter_map(|e| match e {
                                     card::CardEffect::Triggered(TriggeredCardEffect {
-                                        trigger: effect::EffectTrigger::OnSelfCast,
+                                        trigger: effect::EffectTrigger::OnSelfPlay,
                                         effects,
                                     }) => Some(effects),
                                     _ => None,
@@ -603,7 +577,7 @@ impl Game {
                                 .flatten();
 
                             let mut gathered_info = HashMap::new();
-                            for (idx, e) in self_cast_effects.enumerate() {
+                            for (idx, e) in self_play_effects.enumerate() {
                                 match e {
                                     effect::Effect::Continuous(_) => {
                                         return Err(GameError::InvalidCardState)
@@ -615,7 +589,7 @@ impl Game {
                                                 effect::EffectInfoRequest::SingleTarget {
                                                     restriction,
                                                 } => {
-                                                    if let Some(_) = restriction {
+                                                    if restriction.is_some() {
                                                         todo!()
                                                     } else {
                                                         // Without any restrictions targets can
@@ -638,7 +612,7 @@ impl Game {
                                                         let choices = outside
                                                             .get_target_choices_from_given(
                                                                 *active_player,
-                                                                stack_id,
+                                                                *object,
                                                                 name.clone(),
                                                                 possible_choices.clone(),
                                                                 1,
@@ -678,18 +652,16 @@ impl Game {
                                 }
                             }
                             // Step 3
+                            // Calculate costs
                             // Step 4
-
+                            // Pay costs
                             // Step 5
 
-                            let atoms = vec![
-                                GameAtom::AttachChoicesTo {
-                                    zone: ZoneId::Stack,
-                                    object: stack_id,
-                                    choices: gathered_info,
-                                },
-                                GameAtom::PlayerFinishPlayingCard,
-                            ];
+                            let atoms = vec![GameAtom::PlayerPlayCard {
+                                from: *from,
+                                object: *object,
+                                choices: gathered_info,
+                            }];
                             self.apply_atoms(atoms)?;
                         }
                     }
@@ -741,12 +713,13 @@ fn new_game_state_with(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, sync::Arc};
+    use std::{collections::HashMap, str::FromStr, sync::Arc};
 
     use rand::{Rng, SeedableRng};
     use rand_xoshiro::Xoshiro256StarStar;
     use tarpc::{server::Channel, transport::channel::UnboundedChannel, ClientMessage, Response};
     use tokio::sync::Mutex;
+    use uuid::Uuid;
 
     use crate::{
         card::{
@@ -777,7 +750,7 @@ mod tests {
                     kind: BaseCardKind::Quickhack,
                 }],
                 effects: vec![CardEffect::Triggered(TriggeredCardEffect {
-                    trigger: EffectTrigger::OnSelfCast,
+                    trigger: EffectTrigger::OnSelfPlay,
                     effects: vec![Effect::Instant(Box::new(DealDamage(3)))],
                 })],
             },
@@ -794,7 +767,7 @@ mod tests {
                     kind: BaseCardKind::Quickhack,
                 }],
                 effects: vec![CardEffect::Triggered(TriggeredCardEffect {
-                    trigger: EffectTrigger::OnSelfCast,
+                    trigger: EffectTrigger::OnSelfPlay,
                     effects: vec![Effect::Instant(Box::new(DrawCards(3)))],
                 })],
             },
@@ -891,7 +864,7 @@ mod tests {
                 .await
                 .get_player_keeping
                 .as_mut()
-                .expect("No method set")(asked_players)
+                .expect("No method set: get_player_keeping")(asked_players)
         }
         async fn get_next_player_action_from(
             self,
@@ -905,7 +878,9 @@ mod tests {
                 .await
                 .get_next_player_action_from
                 .as_mut()
-                .expect("No method set")(player, player_actions)
+                .expect("No method set: get_next_player_action_from")(
+                player, player_actions
+            )
         }
         async fn get_target_choices_from_given(
             self,
@@ -922,7 +897,9 @@ mod tests {
                 .await
                 .get_target_choices_from_given
                 .as_mut()
-                .expect("No method set")(player, source, name, choices, count)
+                .expect("No method set: get_target_choices_from_given")(
+                player, source, name, choices, count,
+            )
         }
     }
 
@@ -1113,7 +1090,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            let player = harness.player_order.first().unwrap().clone();
+            let player = *harness.player_order.first().unwrap();
 
             game_steps!(
                 harness,
@@ -1154,7 +1131,7 @@ mod tests {
     async_test!(
         async fn check_game_player_plays_card() {
             let mut harness = SimpleTestHarness::new(
-                None,
+                Some(1234),
                 ServerAnswers {
                     ..Default::default()
                 },
@@ -1163,10 +1140,35 @@ mod tests {
             game_steps!(
                 harness,
                 [
+                    @set {
+                        get_player_keeping = |players| {
+                            players
+                        }
+                    };
                     @step_game {};
                     @run {
-                        assert!(matches!(harness.game.latest_gamestate().game_stage, crate::GameStage::GameRunning));
+                        assert_eq!(
+                            harness.game.latest_gamestate().game_stage,
+                            crate::GameStage::GameRunning
+                        );
                     };
+                    @set {
+                        get_next_player_action_from = |_player, player_actions| {
+                            let id = ObjectId(Uuid::from_str("2eaec1b5-94a9-4994-b038-54826e4e3ca6").unwrap());
+                            player_actions.iter().position(|i| matches!(i, PlayerAction::PlayCard { object, ..} if *object == id)).unwrap()
+                        }
+                    };
+                    @set {
+                        get_target_choices_from_given = | player: PlayerId, _source: ObjectId, _name: String, choices: Vec<TargetId>, _count: usize,| {
+                            choices.iter().enumerate().filter(|(_, c)| match c { TargetId::Player(ply) => *ply != player, _ => false }).map(|(idx, _c)| idx).collect()
+                        }
+                    };
+                    @step_game {};
+                    @run {
+                        let state = harness.game.latest_gamestate();
+                        assert_eq!(state.get_stack().objects.len(), 1);
+                    };
+
                 ]
             );
         }
