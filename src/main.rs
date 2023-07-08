@@ -1,12 +1,18 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use axum::{routing::get, Extension, Router};
+use axum::{
+    extract::State,
+    response::{Html, Redirect},
+    routing::{get, post},
+    Extension, Form, Router,
+};
 use axum_login::{
     extractors::AuthContext, memory_store::MemoryStore as AuthMemoryStore, AuthLayer,
     RequireAuthorizationLayer,
 };
 use axum_sessions::{async_session::MemoryStore as SessionMemoryStore, SessionLayer};
 
+use serde::Deserialize;
 use tokio::sync::RwLock;
 use user::User;
 
@@ -49,20 +55,44 @@ fn app() -> Router {
         .route("/", get(root))
         .route_layer(RequireAuth::login())
         .route("/login", get(login_handler))
+        .route("/login", post(do_login))
         .layer(auth_layer)
         .layer(session_layer)
+        .with_state(store)
 }
 
 async fn root(Extension(user): Extension<User>) -> String {
     format!("Hello {}", user.name)
 }
 
-async fn login_handler(mut auth: Auth) -> &'static str {
-    auth.login(&User {
-        name: String::from("test"),
-    })
-    .await
-    .unwrap();
+#[derive(Debug, Deserialize)]
+struct LoginForm {
+    username: String,
+}
 
-    "Logged in!"
+async fn do_login(
+    State(store): State<Arc<RwLock<HashMap<String, User>>>>,
+    mut auth: Auth,
+    data: Form<LoginForm>,
+) -> Redirect {
+    let user = User {
+        name: data.username.clone(),
+    };
+    auth.login(&user).await.unwrap();
+    store.write().await.insert(data.username.clone(), user);
+
+    Redirect::to("/")
+}
+
+async fn login_handler() -> Html<&'static str> {
+    Html(
+        r#"
+        <!DOCTYPE html>
+        <body>
+            <form action="/login" method="POST">
+                <input name="username"></input>
+            </form>
+        </body>
+    "#,
+    )
 }
