@@ -1,5 +1,5 @@
 {
-  description = "The Technomancy game project";
+  description = "The Technomancy engine game project";
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-22.05";
     flake-utils = {
@@ -49,45 +49,48 @@
             filter = filterPath;
           };
 
-
-        cargoArtifacts = craneLib.buildDepsOnly {
+        commonArgs = {
           inherit src;
+          pname = "technomancy_engine";
         };
 
-        technomancy = craneLib.buildPackage {
-          inherit cargoArtifacts src version;
-        };
+
+        cargoArtifacts = craneLib.buildDepsOnly (commonArgs // { });
+
+        technomancy-engine = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts version;
+        });
 
       in
       rec {
         checks = {
-          inherit technomancy;
+          inherit technomancy-engine;
 
-          technomancy-clippy = craneLib.cargoClippy {
-            inherit cargoArtifacts src;
+          technomancy-engine-clippy = craneLib.cargoClippy (commonArgs // {
+            inherit cargoArtifacts;
             cargoClippyExtraArgs = "-- --deny warnings";
-          };
+          });
 
-          technomancy-fmt = craneLib.cargoFmt {
-            inherit src;
-          };
+          technomancy-engine-fmt = craneLib.cargoFmt (commonArgs // { });
         };
 
-        packages.technomancy = technomancy;
-        packages.default = packages.technomancy;
+        packages.technomancy-engine = technomancy-engine;
+        packages.default = packages.technomancy-engine;
 
-        apps.technomancy = flake-utils.lib.mkApp {
-          name = "technomancy";
-          drv = technomancy;
+        apps.technomancy-engine = flake-utils.lib.mkApp {
+          name = "technomancy-engine";
+          drv = technomancy-engine;
         };
-        apps.default = apps.technomancy;
+        apps.default = apps.technomancy-engine;
 
-        devShells.default = devShells.technomancy;
-        devShells.technomancy = pkgs.mkShell {
-          inputsFrom = [ technomancy ];
+        devShells.default = devShells.technomancy-engine;
+        devShells.technomancy-engine = pkgs.mkShell {
+          inputsFrom = [ technomancy-engine ];
 
           nativeBuildInputs = [
             rustTarget
+            pkgs.bacon
+            pkgs.nodePackages.mermaid-cli
           ];
         };
       }
