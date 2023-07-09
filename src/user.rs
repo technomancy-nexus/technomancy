@@ -1,6 +1,7 @@
 use axum_login::{secrecy::SecretVec, AuthUser};
+use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct User {
     pub(crate) name: String,
 }

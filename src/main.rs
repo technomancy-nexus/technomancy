@@ -1,10 +1,11 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::State,
-    response::{Html, Redirect},
+    extract::{rejection::MatchedPathRejection, FromRef, FromRequestParts, MatchedPath, State},
+    http::request::Parts,
+    response::{IntoResponse, Redirect},
     routing::{get, post},
-    Extension, Form, Router,
+    Extension, Form, RequestPartsExt, Router,
 };
 use axum_login::{
     extractors::AuthContext, memory_store::MemoryStore as AuthMemoryStore, AuthLayer,
@@ -12,15 +13,53 @@ use axum_login::{
 };
 use axum_sessions::{async_session::MemoryStore as SessionMemoryStore, SessionLayer};
 
-use serde::Deserialize;
+use axum_template::{engine::Engine, RenderHtml};
+use handlebars::Handlebars;
+use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tracing::trace;
 use user::User;
 
 mod user;
 
+type TemplateEngine = Engine<Handlebars<'static>>;
+type UserStorage = Arc<RwLock<HashMap<String, User>>>;
+
+pub struct PathKey(pub String);
+
+#[async_trait::async_trait]
+impl<S> FromRequestParts<S> for PathKey
+where
+    S: Send + Sync,
+{
+    type Rejection = MatchedPathRejection;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let key = parts
+            // `axum_template::Key` internally uses `axum::extract::MatchedPath`
+            .extract::<MatchedPath>()
+            .await?
+            .as_str()
+            // Cargo doesn't allow `:` as a file name
+            .replace(":", "$")
+            .chars()
+            // Remove the first character `/`
+            .skip(1)
+            .collect();
+        Ok(PathKey(key))
+    }
+}
+
+#[derive(Clone, FromRef)]
+struct AppState {
+    engine: TemplateEngine,
+    storage: UserStorage,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+
     let app = app();
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -51,6 +90,19 @@ fn app() -> Router {
     let user_store: AuthMemoryStore<String, User> = AuthMemoryStore::new(&store);
     let auth_layer = AuthLayer::new(user_store, &secret);
 
+    let mut hbs = Handlebars::new();
+    hbs.set_dev_mode(true);
+    hbs.register_templates_directory(".hbs", "templates")
+        .unwrap();
+
+    let templates = hbs.get_templates().keys().collect::<Vec<_>>();
+    trace!(?templates, "Registered templates");
+
+    let state = AppState {
+        engine: Engine::from(hbs),
+        storage: store,
+    };
+
     Router::new()
         .route("/", get(root))
         .route_layer(RequireAuth::login())
@@ -58,11 +110,16 @@ fn app() -> Router {
         .route("/login", post(do_login))
         .layer(auth_layer)
         .layer(session_layer)
-        .with_state(store)
+        .with_state(state)
 }
 
-async fn root(Extension(user): Extension<User>) -> String {
-    format!("Hello {}", user.name)
+async fn root(Extension(user): Extension<User>, engine: TemplateEngine) -> impl IntoResponse {
+    #[derive(Debug, Serialize)]
+    struct TplData {
+        current_user: User,
+    }
+
+    RenderHtml("root", engine, TplData { current_user: user })
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,7 +128,7 @@ struct LoginForm {
 }
 
 async fn do_login(
-    State(store): State<Arc<RwLock<HashMap<String, User>>>>,
+    State(store): State<UserStorage>,
     mut auth: Auth,
     data: Form<LoginForm>,
 ) -> Redirect {
@@ -84,15 +141,6 @@ async fn do_login(
     Redirect::to("/")
 }
 
-async fn login_handler() -> Html<&'static str> {
-    Html(
-        r#"
-        <!DOCTYPE html>
-        <body>
-            <form action="/login" method="POST">
-                <input name="username"></input>
-            </form>
-        </body>
-    "#,
-    )
+async fn login_handler(engine: TemplateEngine, PathKey(key): PathKey) -> impl IntoResponse {
+    RenderHtml(key, engine, ())
 }
