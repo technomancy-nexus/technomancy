@@ -45,7 +45,7 @@ where
             .await?
             .as_str()
             // Cargo doesn't allow `:` as a file name
-            .replace(":", "&")
+            .replace(':', "&")
             .chars()
             // Remove the first character `/`
             .skip(1)
