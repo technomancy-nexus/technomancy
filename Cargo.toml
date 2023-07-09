@@ -13,6 +13,8 @@ axum-sessions = "0.5.0"
 axum-template = { version = "0.19.0", features = ["handlebars"] }
 handlebars = { version = "4.3.7", features = ["dir_source"] }
 serde = { version = "1.0.167", features = ["derive"] }
+serde_json = "1.0.100"
 tokio = { version = "1.29.1", features = ["full"] }
+tower-http = { version = "0.4.1", features = ["fs"] }
 tracing = { version = "0.1.37" }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }

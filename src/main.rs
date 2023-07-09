@@ -15,15 +15,19 @@ use axum_sessions::{async_session::MemoryStore as SessionMemoryStore, SessionLay
 
 use axum_template::{engine::Engine, RenderHtml};
 use handlebars::Handlebars;
+use lobby::Lobby;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tower_http::services::ServeDir;
 use tracing::trace;
 use user::User;
 
+mod lobby;
 mod user;
 
 type TemplateEngine = Engine<Handlebars<'static>>;
 type UserStorage = Arc<RwLock<HashMap<String, User>>>;
+type LobbyStorage = Arc<RwLock<HashMap<String, Lobby>>>;
 
 pub struct PathKey(pub String);
 
@@ -41,7 +45,7 @@ where
             .await?
             .as_str()
             // Cargo doesn't allow `:` as a file name
-            .replace(":", "$")
+            .replace(":", "&")
             .chars()
             // Remove the first character `/`
             .skip(1)
@@ -53,7 +57,8 @@ where
 #[derive(Clone, FromRef)]
 struct AppState {
     engine: TemplateEngine,
-    storage: UserStorage,
+    user_storage: UserStorage,
+    lobby_storage: LobbyStorage,
 }
 
 #[tokio::main]
@@ -98,16 +103,31 @@ fn app() -> Router {
     let templates = hbs.get_templates().keys().collect::<Vec<_>>();
     trace!(?templates, "Registered templates");
 
+    let lobby_storage = Arc::new(RwLock::new(HashMap::from([(
+        "default".to_string(),
+        Lobby {
+            id: "default".to_string(),
+            name: "The Default Lobby".to_string(),
+            users: Default::default(),
+        },
+    )])));
+
     let state = AppState {
         engine: Engine::from(hbs),
-        storage: store,
+        user_storage: store,
+        lobby_storage,
     };
 
     Router::new()
         .route("/", get(root))
+        .route("/lobbies", get(lobby::list_lobbies))
+        .route("/lobbies", post(lobby::create_lobby))
+        .route("/lobbies/:lobby_id/join", post(lobby::join_lobby))
+        .route("/lobbies/:lobby_id", get(lobby::show_lobby))
         .route_layer(RequireAuth::login())
         .route("/login", get(login_handler))
         .route("/login", post(do_login))
+        .nest_service("/static", ServeDir::new("static"))
         .layer(auth_layer)
         .layer(session_layer)
         .with_state(state)
