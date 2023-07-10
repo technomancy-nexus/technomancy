@@ -3,6 +3,8 @@ CODE LICENSES
 
 All program parts written in Rust in this project are licensed under the
 AGPL-v3.0 or later. See LICENSE-AGPL-3.0 for the full text.
+Except the 'technomancy_core' crate, which is licensed under the GPL-v3.0.
+See LICENSE-GPL-3.0 for the full text.
 
 Card decks loaded at runtime by technomancy_engine are complex data
 structures read by the library and the larger game engine, and thus form part
