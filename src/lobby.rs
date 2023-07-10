@@ -15,6 +15,7 @@ use crate::{user::User, LobbyStorage, PathKey, TemplateEngine};
 pub struct Lobby {
     pub(crate) id: String,
     pub(crate) name: String,
+    pub(crate) owner: String,
     pub(crate) users: HashSet<String>,
 }
 
@@ -42,6 +43,7 @@ pub async fn create_lobby(
     let id = format!("{}_lobby", user.name);
     let new_lobby = Lobby {
         name: new_lobby.name,
+        owner: user.name.clone(),
         users: [user.name.clone()].into(),
         id: id.clone(),
     };
