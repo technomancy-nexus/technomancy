@@ -578,6 +578,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "technomancy_core"
+version = "0.0.0"
+
+[[package]]
 name = "technomancy_engine"
 version = "0.1.0"
 dependencies = [
