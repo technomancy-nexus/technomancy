@@ -16,6 +16,7 @@ rand = "0.8.5"
 rand_xoshiro = { version = "0.6.0", features = ["serde", "serde1"] }
 serde = { version = "1.0.163", features = ["derive"] }
 tarpc = { version = "0.33.0", features = ["tokio1"] }
+technomancy_core = { version = "0.0.0", path = "core" }
 thiserror = "1.0.40"
 tokio = { version = "1.28.1", features = [
     "tokio-macros",

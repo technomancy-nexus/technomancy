@@ -1,20 +1,18 @@
 #![allow(dead_code, clippy::too_many_arguments)]
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use card::{Card, CardId};
-use effect::{EffectInfo, ExecuteFailure};
-use outside::{OutsideGame, OutsideGameClient};
-use rand::{seq::SliceRandom, Fill, Rng};
+use outside::OutsideGameClient;
+use rand::{seq::SliceRandom, Rng};
 use rand_xoshiro::Xoshiro256StarStar;
-use serde::{Deserialize, Serialize};
-use tarpc::client::RpcError;
+use technomancy_core::{
+    card::{Card, CardEffect, CardId, TriggeredCardEffect},
+    effect::{Effect, EffectInfo, EffectInfoRequest, EffectTrigger},
+    Game, GameAtom, GameError, GameId, GameObject, GameStage, GameState, GameZone, ObjectId,
+    Player, PlayerAction, PlayerId, TargetId, VerificationError, ZoneId,
+};
 use tracing::trace;
-use uuid::Uuid;
 
-use crate::card::TriggeredCardEffect;
+use crate::outside::OutsideGame;
 
 pub mod card;
 pub mod effect;
@@ -39,286 +37,34 @@ impl Engine {
     }
 }
 
-pub fn get_seeded_uuid(rng: &mut impl Rng) -> uuid::Uuid {
-    let mut random_bytes: [u8; 16] = [0; 16];
-    random_bytes.try_fill(rng).unwrap();
-
-    uuid::Builder::from_random_bytes(random_bytes).into_uuid()
+struct GameImplV1 {
+    game: Game,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum PlayerAction {
-    PlayCard { from: ZoneId, object: ObjectId },
-    PassPriority,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct PlayerId(Uuid);
-
-impl PlayerId {
-    fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Player {
-    id: PlayerId,
-    initial_cards: Vec<CardId>,
-    starting_health: usize,
-    health: isize,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ZoneId {
-    Hand(PlayerId),
-    Library(PlayerId),
-    Discard(PlayerId),
-    Battlefield,
-    Stack,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(transparent)]
-pub struct Objects(pub Vec<GameObject>);
-
-impl std::ops::Deref for Objects {
-    type Target = Vec<GameObject>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for Objects {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GameZone {
-    objects: Objects,
-}
-
-impl GameZone {
-    fn empty() -> GameZone {
-        GameZone {
-            objects: Objects(vec![]),
-        }
-    }
-
-    fn with(objects: Vec<GameObject>) -> GameZone {
-        GameZone {
-            objects: Objects(objects),
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct LibraryCardId(uuid::Uuid);
-
-impl LibraryCardId {
-    fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct ObjectId(uuid::Uuid);
-
-impl ObjectId {
-    fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GameObject {
-    id: ObjectId,
-    /// An identifier for that tracks a card throughout the whole game, no two objects in the same
-    /// game should have the same library card id
-    library_card_id: Option<LibraryCardId>,
-    /// The identifier of the card it represents if any, several objects may have the same card id
-    underlying_card: Option<CardId>,
-    /// Objects only have a controller on the stack and battlefield
-    controller: Option<PlayerId>,
-    /// Any choices associated to the object
-    choices: HashMap<(usize, String), EffectInfo>,
-}
-impl GameObject {
-    fn from_card(rand: &mut impl Rng, underlying_card: CardId) -> GameObject {
-        GameObject {
-            id: ObjectId::new(rand),
-            library_card_id: Some(LibraryCardId::new(rand)),
-            underlying_card: Some(underlying_card),
-            controller: None,
-            choices: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum GameError {
-    #[error("Game was already running when a GameStart atom was sent")]
-    GameAlreadyRunning,
-    #[error("An RPC error was encountered")]
-    RPCError(#[from] RpcError),
-    #[error("A keep hand atom was generated during normal game running")]
-    KeepHandDuringGame,
-    #[error("An invalid action was selected")]
-    InvalidAction {
-        list_length: usize,
-        selected_action: usize,
-    },
-    #[error("The expected object ({object:?}) could not be found in {zone:?}")]
-    ObjectNotFoundInZone { zone: ZoneId, object: ObjectId },
-    #[error("A player was marked as passing although they either already passed, or its not their moment to pass")]
-    InvalidPlayerPassing { player: PlayerId },
-    #[error("An object was expected to contain an underlying card, but it did not")]
-    NoUnderlyingCard { object: ObjectId },
-    #[error("A card id was given without the existing card underneath")]
-    CardNotFound { card: CardId },
-    #[error("A response was given with more or less than the required amount")]
-    InvalidChoiceAmount { expected: usize, received: usize },
-    #[error("An effect failed to execute")]
-    EffectExecuteFailure {
-        #[source]
-        failure: ExecuteFailure,
-    },
-    #[error("A given card was not implemented correctly")]
-    InvalidCardState,
-}
-
-pub enum VerificationError {
-    PlayerInvalidCard { id: PlayerId, card: CardId },
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SourceId {
-    Player(PlayerId),
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TargetId {
-    Player(PlayerId),
-    Object(ObjectId),
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub enum GameAtom {
-    /// Starts the game
-    ///
-    /// Only valid at the beginning of the game
-    StartGame,
-    KeepHand {
-        player: PlayerId,
-    },
-    ShuffleHandIntoLibrary {
-        player: PlayerId,
-    },
-    DrawCards {
-        player: PlayerId,
-        count: usize,
-    },
-    DealDamage {
-        amount: usize,
-        source: ObjectId,
-        target: TargetId,
-    },
-    PassPriority {
-        player: PlayerId,
-    },
-    PlayerPlayCard {
-        player: PlayerId,
-        from: ZoneId,
-        object: ObjectId,
-        choices: HashMap<(usize, String), EffectInfo>,
-    },
-    ResetPriority,
-    PopStack,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-#[serde(transparent)]
-pub struct GameId(Uuid);
-
-impl GameId {
-    fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub enum GameStage {
-    KeepHand { players_keeping: HashSet<PlayerId> },
-    GameRunning,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GameState {
-    zones: hashbrown::HashMap<ZoneId, GameZone>,
-    /// The turn order, index 0 is the active player
-    active_player_order: Vec<PlayerId>,
-    /// Players who have not yet passed since the last stack-modifying action
-    unpassed_players: Vec<PlayerId>,
-    game_stage: GameStage,
-}
-impl GameState {
-    fn get_hand(&self, p: PlayerId) -> &GameZone {
-        self.zones.get(&ZoneId::Hand(p)).unwrap()
-    }
-
-    fn get_stack(&self) -> &GameZone {
-        self.zones.get(&ZoneId::Stack).unwrap()
-    }
-
-    fn get_battlefield(&self) -> &GameZone {
-        self.zones.get(&ZoneId::Battlefield).unwrap()
-    }
-
-    fn get_object_from_zone(&self, from: ZoneId, obj: ObjectId) -> Option<&GameObject> {
-        let zone = self.zones.get(&from)?;
-        zone.objects.iter().find(|o| o.id == obj)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Game {
-    #[serde(skip)]
-    cards: Arc<std::collections::HashMap<CardId, Card>>,
-    id: GameId,
-    players: std::collections::HashMap<PlayerId, Player>,
-    rand: Xoshiro256StarStar,
-    game_states: Vec<GameState>,
-    history: Vec<(usize, Vec<GameAtom>)>,
-}
-
-impl Game {
+impl GameImplV1 {
     pub fn new(
         mut rand: Xoshiro256StarStar,
         cards: Arc<std::collections::HashMap<CardId, Card>>,
         players: std::collections::HashMap<PlayerId, Player>,
         order: Vec<PlayerId>,
-    ) -> Self {
+    ) -> GameImplV1 {
         let initial_game_state = new_game_state_with(&mut rand, &players, &order);
-        Self {
-            cards,
-            players,
-            id: GameId::new(&mut rand),
-            rand,
-            game_states: vec![initial_game_state],
-            history: vec![],
+        GameImplV1 {
+            game: Game {
+                cards,
+                players,
+                id: GameId::new(&mut rand),
+                rand,
+                game_states: vec![initial_game_state],
+                history: vec![],
+            },
         }
     }
 
     pub fn verify(&self, engine: &Engine) -> Result<(), Vec<VerificationError>> {
         let mut errors = vec![];
 
-        for (id, player) in &self.players {
+        for (id, player) in &self.game.players {
             for card in &player.initial_cards {
                 if !engine.card_exists(*card) {
                     errors.push(VerificationError::PlayerInvalidCard {
@@ -336,27 +82,14 @@ impl Game {
         Ok(())
     }
 
-    pub fn get_controller_of(&self, object: ObjectId) -> Option<PlayerId> {
-        let state = self.latest_gamestate();
-        let bf = state.zones.get(&ZoneId::Battlefield).unwrap();
-        let stack = state.zones.get(&ZoneId::Stack).unwrap();
-
-        let obj = bf
-            .objects
-            .iter()
-            .chain(stack.objects.iter())
-            .find(|o| o.id == object)?;
-
-        obj.controller
-    }
-
-    fn latest_gamestate(&self) -> &GameState {
-        self.game_states.last().unwrap()
+    pub fn latest_gamestate(&self) -> &GameState {
+        self.game.latest_gamestate()
     }
 
     pub fn apply_atoms(&mut self, atoms: Vec<GameAtom>) -> Result<(), GameError> {
-        self.history
-            .push((self.game_states.len() - 1, atoms.clone()));
+        self.game
+            .history
+            .push((self.game.game_states.len() - 1, atoms.clone()));
         let mut next_state = self.latest_gamestate().clone();
         for atom in atoms {
             match atom {
@@ -373,7 +106,7 @@ impl Game {
                     target,
                 } => match target {
                     TargetId::Player(ply) => {
-                        let player = self.players.get_mut(&ply).unwrap();
+                        let player = self.game.players.get_mut(&ply).unwrap();
                         player.health -= amount as isize;
                     }
                     TargetId::Object(_) => todo!(),
@@ -388,7 +121,7 @@ impl Game {
                 GameAtom::ShuffleHandIntoLibrary { player } => {
                     let Some([hand, library]) = next_state.zones.get_many_mut([&ZoneId::Hand(player), &ZoneId::Library(player)]) else { unreachable!() };
                     library.objects.extend(hand.objects.drain(..));
-                    library.objects.shuffle(&mut self.rand);
+                    library.objects.shuffle(&mut self.game.rand);
                 }
                 GameAtom::DrawCards { player, count } => {
                     let Some([hand, library]) = next_state.zones.get_many_mut([&ZoneId::Hand(player), &ZoneId::Library(player)]) else { unreachable!() };
@@ -435,17 +168,18 @@ impl Game {
                 }
             }
         }
-        self.game_states.push(next_state);
+        self.game.game_states.push(next_state);
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip_all, fields(game = ?self.id), err)]
-    async fn run(&mut self, outside: &OutsideGameClient) -> Result<(), GameError> {
+    #[tracing::instrument(level = "trace", skip_all, fields(game = ?self.game.id), err)]
+    pub async fn run(&mut self, outside: &OutsideGameClient) -> Result<(), GameError> {
         match self.latest_gamestate().game_stage.clone() {
             GameStage::KeepHand { players_keeping } => {
                 trace!("Checking for potential mulligans");
                 let latest_gamestate = self.latest_gamestate();
                 let atoms: Vec<_> = self
+                    .game
                     .players
                     .keys()
                     .filter(|p| !players_keeping.contains(p))
@@ -480,6 +214,7 @@ impl Game {
                 };
 
                 let players_not_kept_yet = self
+                    .game
                     .players
                     .keys()
                     .filter(|p| !players_keeping.contains(p))
@@ -500,7 +235,7 @@ impl Game {
                         unreachable!()
                     };
 
-                if players_keeping.len() == self.players.len() {
+                if players_keeping.len() == self.game.players.len() {
                     trace!("All players have kept, we can start the game");
                     self.apply_atoms(vec![GameAtom::StartGame])?;
                     return Ok(());
@@ -525,6 +260,7 @@ impl Game {
                         )?;
 
                         let card = self
+                            .game
                             .cards
                             .get(card)
                             .ok_or(GameError::CardNotFound { card: *card })?;
@@ -534,8 +270,8 @@ impl Game {
                             .effects
                             .iter()
                             .filter_map(|e| match e {
-                                card::CardEffect::Triggered(TriggeredCardEffect {
-                                    trigger: effect::EffectTrigger::OnResolve,
+                                CardEffect::Triggered(TriggeredCardEffect {
+                                    trigger: EffectTrigger::OnResolve,
                                     effects,
                                 }) => Some(effects),
                                 _ => None,
@@ -544,7 +280,7 @@ impl Game {
 
                         let mut atoms = vec![];
                         for (idx, effect) in resolve_effects.enumerate() {
-                            if let effect::Effect::Instant(eff) = effect {
+                            if let Effect::Instant(eff) = effect {
                                 let info = top_item
                                     .choices
                                     .iter()
@@ -553,7 +289,7 @@ impl Game {
                                     .collect();
 
                                 let effect_atoms = eff
-                                    .execute(info, top_item.id, self)
+                                    .execute(info, top_item.id, &self.game)
                                     .await
                                     .map_err(|e| GameError::EffectExecuteFailure { failure: e })?;
                                 atoms.extend(effect_atoms);
@@ -632,6 +368,7 @@ impl Game {
                                 .ok_or(GameError::NoUnderlyingCard { object: *object })?;
 
                             let card = self
+                                .game
                                 .cards
                                 .get(card)
                                 .ok_or(GameError::CardNotFound { card: *card })?;
@@ -641,8 +378,8 @@ impl Game {
                                 .effects
                                 .iter()
                                 .filter_map(|e| match e {
-                                    card::CardEffect::Triggered(TriggeredCardEffect {
-                                        trigger: effect::EffectTrigger::OnResolve,
+                                    CardEffect::Triggered(TriggeredCardEffect {
+                                        trigger: EffectTrigger::OnResolve,
                                         effects,
                                     }) => Some(effects),
                                     _ => None,
@@ -652,16 +389,14 @@ impl Game {
                             let mut gathered_info = HashMap::new();
                             for (idx, e) in resolve_effects.enumerate() {
                                 match e {
-                                    effect::Effect::Continuous(_) => {
+                                    Effect::Continuous(_) => {
                                         return Err(GameError::InvalidCardState)
                                     }
-                                    effect::Effect::Instant(instant) => {
+                                    Effect::Instant(instant) => {
                                         let required_info = instant.get_required_info();
                                         for (name, question) in required_info {
                                             match question {
-                                                effect::EffectInfoRequest::SingleTarget {
-                                                    restriction,
-                                                } => {
+                                                EffectInfoRequest::SingleTarget { restriction } => {
                                                     if restriction.is_some() {
                                                         todo!()
                                                     } else {
@@ -670,7 +405,8 @@ impl Game {
                                                         // players
                                                         let mut possible_choices = vec![];
                                                         possible_choices.extend(
-                                                            self.players
+                                                            self.game
+                                                                .players
                                                                 .keys()
                                                                 .map(|p| TargetId::Player(*p)),
                                                         );
@@ -713,7 +449,7 @@ impl Game {
                                                                 .collect();
                                                         gathered_info.insert(
                                                             (idx, name),
-                                                            effect::EffectInfo::SingleTarget(
+                                                            EffectInfo::SingleTarget(
                                                                 selected_choices[0],
                                                             ),
                                                         );
@@ -798,18 +534,20 @@ mod tests {
     use tokio::sync::Mutex;
     use uuid::Uuid;
 
-    use crate::{
+    use technomancy_core::{
         card::{
             BaseCardKind, Card, CardBehaviour, CardEffect, CardId, CardKind, Cost,
             TriggeredCardEffect,
         },
-        effect::{
-            tests::{DealDamage, DrawCards},
-            Effect, EffectTrigger,
-        },
+        effect::{Effect, EffectTrigger},
         outside::{Outside, OutsideClient, OutsideRequest, OutsideResponse},
-        Engine, Game, GameId, ObjectId, OutsideGameClient, Player, PlayerAction, PlayerId,
-        TargetId, ZoneId,
+        GameId, ObjectId, Player, PlayerAction, PlayerId, TargetId, ZoneId,
+    };
+
+    use crate::{
+        effect::tests::{DealDamage, DrawCards},
+        outside::OutsideGameClient,
+        Engine, GameImplV1,
     };
 
     const BLAST_CARD: uuid::Uuid = uuid::uuid!("4abc4619-b61c-44a4-9d37-8a31bda65b48");
@@ -999,7 +737,7 @@ mod tests {
     struct SimpleTestHarness {
         engine: Engine,
         player_order: Vec<PlayerId>,
-        game: Game,
+        game_impl: GameImplV1,
         outside_client: OutsideGameClient,
         answers: Arc<Mutex<ServerAnswers>>,
     }
@@ -1009,7 +747,7 @@ mod tests {
     ) -> (
         Vec<PlayerId>,
         Engine,
-        Game,
+        GameImplV1,
         tarpc::transport::channel::UnboundedChannel<
             tarpc::ClientMessage<OutsideRequest>,
             tarpc::Response<OutsideResponse>,
@@ -1021,11 +759,11 @@ mod tests {
         let player_order: Vec<_> = players.keys().copied().collect();
         let engine = new_engine();
 
-        let game = Game::new(rand, engine.cards.clone(), players, player_order.clone());
+        let game_impl = GameImplV1::new(rand, engine.cards.clone(), players, player_order.clone());
 
-        let (server, outside_client) = outside_client(game.id);
+        let (server, outside_client) = outside_client(game_impl.game.id);
 
-        (player_order, engine, game, server, outside_client)
+        (player_order, engine, game_impl, server, outside_client)
     }
 
     impl SimpleTestHarness {
@@ -1051,13 +789,13 @@ mod tests {
             SimpleTestHarness,
             UnboundedChannel<ClientMessage<OutsideRequest>, Response<OutsideResponse>>,
         ) {
-            let (player_order, engine, game, server, outside_client) = init_harness(seed);
+            let (player_order, engine, game_impl, server, outside_client) = init_harness(seed);
 
             (
                 SimpleTestHarness {
                     engine,
                     player_order,
-                    game,
+                    game_impl,
                     outside_client,
                     answers: Arc::new(Mutex::new(answers)),
                 },
@@ -1074,7 +812,7 @@ mod tests {
             *$harness.answers.lock().await = ServerAnswers::default();
         };
         (@step_game $harness:ident) => {
-            $harness.game.run(&$harness.outside_client).await.unwrap();
+            $harness.game_impl.run(&$harness.outside_client).await.unwrap();
         };
         (@run $harness:ident $($normal:tt)*) => {
             $($normal)*
@@ -1123,9 +861,13 @@ mod tests {
     async_test!(
         async fn check_initial_game_creation() {
             let mut harness = SimpleTestHarness::new(None, ServerAnswers::default());
-            harness.game.run(&harness.outside_client).await.unwrap();
+            harness
+                .game_impl
+                .run(&harness.outside_client)
+                .await
+                .unwrap();
 
-            assert!(!harness.game.game_states.is_empty());
+            assert!(!harness.game_impl.game.game_states.is_empty());
         }
     );
 
@@ -1138,8 +880,12 @@ mod tests {
                     ..Default::default()
                 },
             );
-            harness.game.run(&harness.outside_client).await.unwrap();
-            let state = harness.game.latest_gamestate();
+            harness
+                .game_impl
+                .run(&harness.outside_client)
+                .await
+                .unwrap();
+            let state = harness.game_impl.latest_gamestate();
 
             let first_player = harness.player_order.first().copied().unwrap();
 
@@ -1170,9 +916,13 @@ mod tests {
                     ..Default::default()
                 },
             );
-            harness.game.run(&harness.outside_client).await.unwrap();
+            harness
+                .game_impl
+                .run(&harness.outside_client)
+                .await
+                .unwrap();
 
-            let state = harness.game.latest_gamestate();
+            let state = harness.game_impl.latest_gamestate();
 
             assert_eq!(&state.active_player_order, &harness.player_order);
         }
@@ -1207,7 +957,7 @@ mod tests {
                 ]
             );
 
-            let state = harness.game.latest_gamestate();
+            let state = harness.game_impl.latest_gamestate();
             assert!(
                 matches!(state.game_stage, crate::GameStage::GameRunning),
                 "Game is still not running!"
@@ -1246,7 +996,7 @@ mod tests {
                     @step_game {};
                     @run {
                         assert_eq!(
-                            harness.game.latest_gamestate().game_stage,
+                            harness.game_impl.latest_gamestate().game_stage,
                             crate::GameStage::GameRunning
                         );
                     };
@@ -1266,7 +1016,7 @@ mod tests {
                     };
                     @step_game {};
                     @run {
-                        let state = harness.game.latest_gamestate();
+                        let state = harness.game_impl.latest_gamestate();
                         assert_eq!(state.get_stack().objects.len(), 1);
                     };
                     @unset {};
@@ -1280,7 +1030,7 @@ mod tests {
                     @step_game {};
                     @step_game {};
                     @run {
-                        let state = harness.game.latest_gamestate();
+                        let state = harness.game_impl.latest_gamestate();
                         assert_eq!(state.get_hand(player).objects.len(), 7);
                     };
                 ]
