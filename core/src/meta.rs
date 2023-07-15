@@ -35,6 +35,7 @@ pub enum ChannelOrIoError {
 /// Returns two transports that multiplex over the given transport.
 /// The first transport can be used by a server: it receives requests and sends back responses.
 /// The second transport can be used by a client: it sends requests and receives back responses.
+#[allow(clippy::type_complexity)]
 pub fn spawn_twoway<Req1, Resp1, Req2, Resp2, T>(
     transport: T,
 ) -> (
@@ -91,7 +92,7 @@ where
     // Task for outbound message handling
     tokio::spawn(
         abortable_sink_channel
-            .forward(transport_sink.sink_map_err(|e| ChannelOrIoError::IoError(e)))
+            .forward(transport_sink.sink_map_err(ChannelOrIoError::IoError))
             .inspect_ok(|_| debug!("transport_sink done"))
             .inspect_err(|e| warn!("Error in outbound multiplexing: {}", e)),
     );

@@ -26,6 +26,7 @@ pub fn get_seeded_uuid(rng: &mut impl Rng) -> uuid::Uuid {
 pub struct GameId(Uuid);
 
 impl GameId {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
@@ -122,6 +123,7 @@ pub enum PlayerAction {
 pub struct PlayerId(Uuid);
 
 impl PlayerId {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
