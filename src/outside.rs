@@ -1,4 +1,7 @@
-use std::{time::{Duration, SystemTime}, sync::Arc};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use tarpc::client::RpcError;
 use technomancy_core::outside::OutsideClient;

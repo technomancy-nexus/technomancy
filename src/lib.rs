@@ -265,7 +265,9 @@ impl GameImplV1 {
                                 }) => Some(effects),
                                 _ => None,
                             })
-                            .flatten().enumerate().collect::<Vec<_>>();
+                            .flatten()
+                            .enumerate()
+                            .collect::<Vec<_>>();
 
                         let mut atoms = vec![];
                         for (idx, effect) in resolve_effects {
