@@ -1,4 +1,4 @@
-use std::time::{Duration, SystemTime};
+use std::{time::{Duration, SystemTime}, sync::Arc};
 
 use tarpc::client::RpcError;
 use technomancy_core::outside::OutsideClient;
@@ -27,9 +27,16 @@ pub trait OutsideGame {
     async fn get_player_passing(&self, player: PlayerId) -> Result<bool, RpcError>;
 }
 
+#[derive(Debug)]
 pub struct OutsideGameClient {
     pub game_id: GameId,
-    pub client: OutsideClient,
+    pub client: Arc<OutsideClient>,
+}
+
+impl OutsideGameClient {
+    pub fn new(game_id: GameId, client: Arc<OutsideClient>) -> Self {
+        Self { game_id, client }
+    }
 }
 
 #[async_trait::async_trait]

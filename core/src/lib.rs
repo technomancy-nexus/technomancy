@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 pub mod card;
 pub mod effect;
+pub mod meta;
 pub mod outside;
 
 pub fn get_seeded_uuid(rng: &mut impl Rng) -> uuid::Uuid {
@@ -25,8 +26,8 @@ pub fn get_seeded_uuid(rng: &mut impl Rng) -> uuid::Uuid {
 pub struct GameId(Uuid);
 
 impl GameId {
-    pub fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
     }
 }
 
@@ -121,8 +122,8 @@ pub enum PlayerAction {
 pub struct PlayerId(Uuid);
 
 impl PlayerId {
-    pub fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
     }
 }
 
@@ -130,8 +131,6 @@ impl PlayerId {
 pub struct Player {
     pub id: PlayerId,
     pub initial_cards: Vec<CardId>,
-    pub starting_health: usize,
-    pub health: isize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
