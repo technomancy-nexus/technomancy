@@ -17,6 +17,7 @@ use technomancy_core::{
 };
 use technomancy_engine::{outside::OutsideGameClient, GameImplV1};
 use tokio::task::AbortHandle;
+use tracing::error;
 
 #[derive(Debug)]
 struct GameInfo {
@@ -69,7 +70,15 @@ impl Meta for EngineServer {
             let mut game = game;
             let client = client;
             loop {
-                assert_send(game.run(&client).boxed()).await;
+                let res = assert_send(game.run(&client).boxed()).await;
+
+                match res {
+                    Ok(_) => (),
+                    Err(e) => {
+                        error!("Encountered an error: {e}");
+                        break;
+                    }
+                }
             }
         })
         .abort_handle();
