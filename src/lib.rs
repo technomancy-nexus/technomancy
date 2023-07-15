@@ -265,10 +265,10 @@ impl GameImplV1 {
                                 }) => Some(effects),
                                 _ => None,
                             })
-                            .flatten();
+                            .flatten().enumerate().collect::<Vec<_>>();
 
                         let mut atoms = vec![];
-                        for (idx, effect) in resolve_effects.enumerate() {
+                        for (idx, effect) in resolve_effects {
                             if let Effect::Instant(eff) = effect {
                                 let info = top_item
                                     .choices
@@ -377,10 +377,12 @@ impl GameImplV1 {
                                     }) => Some(effects),
                                     _ => None,
                                 })
-                                .flatten();
+                                .flatten()
+                                .enumerate()
+                                .collect::<Vec<_>>();
 
                             let mut gathered_info = HashMap::new();
-                            for (idx, e) in resolve_effects.enumerate() {
+                            for (idx, e) in resolve_effects {
                                 match e {
                                     Effect::Continuous(_) => {
                                         return Err(GameError::InvalidCardState)
