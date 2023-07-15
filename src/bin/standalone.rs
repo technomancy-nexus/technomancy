@@ -17,7 +17,7 @@ use technomancy_core::{
 };
 use technomancy_engine::{outside::OutsideGameClient, GameImplV1};
 use tokio::task::AbortHandle;
-use tracing::error;
+use tracing::{error, info};
 
 #[derive(Debug)]
 struct GameInfo {
@@ -91,7 +91,10 @@ impl Meta for EngineServer {
     }
 
     async fn destroy_game(self, _ctx: Context, game: GameId) {
-        self.games.remove(&game);
+        if let Some((_, game)) = self.games.remove(&game) {
+            info!("Aborting game");
+            game.handle.abort();
+        }
     }
 }
 
