@@ -19,7 +19,7 @@ pub mod tests {
             .into()
         }
 
-        async fn executae(
+        async fn execute(
             &self,
             info: HashMap<String, EffectInfo>,
             source: ObjectId,
