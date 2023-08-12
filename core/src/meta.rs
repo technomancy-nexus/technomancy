@@ -32,7 +32,7 @@ pub enum ChannelOrIoError {
     IoError(#[from] std::io::Error),
 }
 
-/// Returns two transports that multiplex over the given transport.
+/// Returns two transports `(server, client)` that multiplex over the given transport.
 /// The first transport can be used by a server: it receives requests and sends back responses.
 /// The second transport can be used by a client: it sends requests and receives back responses.
 #[allow(clippy::type_complexity)]
