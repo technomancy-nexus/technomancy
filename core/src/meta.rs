@@ -1,12 +1,19 @@
-use futures::{
-    stream::{AbortHandle, Abortable},
-    Sink, SinkExt, Stream, StreamExt, TryFutureExt, TryStreamExt,
-};
-use tarpc::transport::channel::{ChannelError, UnboundedChannel};
+use futures::stream::AbortHandle;
+use futures::stream::Abortable;
+use futures::Sink;
+use futures::SinkExt;
+use futures::Stream;
+use futures::StreamExt;
+use futures::TryFutureExt;
+use futures::TryStreamExt;
+use tarpc::transport::channel::ChannelError;
+use tarpc::transport::channel::UnboundedChannel;
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::debug;
+use tracing::warn;
 
-use crate::{GameId, Player};
+use crate::GameId;
+use crate::Player;
 
 /// The protocol between the Server and the Engine
 #[tarpc::service]

@@ -1,12 +1,14 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
 
-use card::{Card, CardId};
-use effect::{EffectInfo, ExecuteFailure};
+use card::Card;
+use card::CardId;
+use effect::EffectInfo;
+use effect::ExecuteFailure;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
 pub mod card;

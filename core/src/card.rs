@@ -1,7 +1,9 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
-use crate::effect::{Effect, EffectTrigger};
+use crate::effect::Effect;
+use crate::effect::EffectTrigger;
 
 #[derive(Default, Debug)]
 pub struct Cost {

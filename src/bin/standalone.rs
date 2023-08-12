@@ -1,27 +1,32 @@
-
-#[cfg(test)] use std::net::SocketAddr;
-
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 use clap::Parser;
 use dashmap::DashMap;
-use futures::{FutureExt, StreamExt};
+use futures::FutureExt;
+use futures::StreamExt;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256StarStar;
-use tarpc::{
-    context::Context,
-    server::{BaseChannel, Channel},
-};
-use technomancy_core::{
-    card::{Card, CardId},
-    meta::{spawn_twoway, Meta},
-    outside::OutsideClient,
-    GameId, Player,
-};
-use technomancy_engine::{outside::OutsideGameClient, GameImplV1};
-use tokio::{sync::oneshot::Sender, task::AbortHandle};
-use tracing::{error, info};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tarpc::context::Context;
+use tarpc::server::BaseChannel;
+use tarpc::server::Channel;
+use technomancy_core::card::Card;
+use technomancy_core::card::CardId;
+use technomancy_core::meta::spawn_twoway;
+use technomancy_core::meta::Meta;
+use technomancy_core::outside::OutsideClient;
+use technomancy_core::GameId;
+use technomancy_core::Player;
+use technomancy_engine::outside::OutsideGameClient;
+use technomancy_engine::GameImplV1;
+use tokio::sync::oneshot::Sender;
+use tokio::task::AbortHandle;
+use tracing::error;
+use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Debug)]
 struct GameInfo {
@@ -175,14 +180,16 @@ mod tests {
     use std::sync::Arc;
 
     use tarpc::context::Context;
-    use technomancy_core::{
-        meta::{spawn_twoway, MetaClient},
-        outside::{OutsideRequest, OutsideResponse},
-    };
+    use technomancy_core::meta::spawn_twoway;
+    use technomancy_core::meta::MetaClient;
+    use technomancy_core::outside::OutsideRequest;
+    use technomancy_core::outside::OutsideResponse;
     use tokio::task::JoinHandle;
     use tracing::info;
 
-    use crate::{start_server, Args, ServerInfo};
+    use crate::start_server;
+    use crate::Args;
+    use crate::ServerInfo;
 
     async fn get_server() -> (ServerInfo, JoinHandle<()>) {
         let args = Args {

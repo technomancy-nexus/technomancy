@@ -1,12 +1,15 @@
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::sync::Arc;
+use std::time::Duration;
+use std::time::SystemTime;
 
 use tarpc::client::RpcError;
 use technomancy_core::outside::OutsideClient;
 
-use crate::{GameId, ObjectId, PlayerAction, PlayerId, TargetId};
+use crate::GameId;
+use crate::ObjectId;
+use crate::PlayerAction;
+use crate::PlayerId;
+use crate::TargetId;
 
 #[async_trait::async_trait]
 pub trait OutsideGame {

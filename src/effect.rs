@@ -2,9 +2,13 @@
 pub mod tests {
     use std::collections::HashMap;
 
-    use crate::{GameAtom, ObjectId};
+    use technomancy_core::effect::EffectInfo;
+    use technomancy_core::effect::EffectInfoRequest;
+    use technomancy_core::effect::ExecuteFailure;
+    use technomancy_core::effect::InstantEffect;
 
-    use technomancy_core::effect::{EffectInfo, EffectInfoRequest, ExecuteFailure, InstantEffect};
+    use crate::GameAtom;
+    use crate::ObjectId;
 
     #[derive(Debug)]
     pub struct DealDamage(pub usize);

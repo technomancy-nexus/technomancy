@@ -1,8 +1,13 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::collections::HashMap;
+use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::{Game, GameAtom, ObjectId, TargetId};
+use crate::Game;
+use crate::GameAtom;
+use crate::ObjectId;
+use crate::TargetId;
 
 #[derive(Debug)]
 pub enum EffectTrigger {

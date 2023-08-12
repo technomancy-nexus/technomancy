@@ -1,6 +1,10 @@
 #![allow(clippy::too_many_arguments)]
 
-use crate::{GameId, ObjectId, PlayerAction, PlayerId, TargetId};
+use crate::GameId;
+use crate::ObjectId;
+use crate::PlayerAction;
+use crate::PlayerId;
+use crate::TargetId;
 
 #[tarpc::service]
 pub trait Outside {

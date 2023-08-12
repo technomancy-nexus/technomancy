@@ -1,15 +1,34 @@
 #![allow(dead_code, clippy::too_many_arguments)]
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use outside::OutsideGameClient;
-use rand::{seq::SliceRandom, Rng};
+use rand::seq::SliceRandom;
+use rand::Rng;
 use rand_xoshiro::Xoshiro256StarStar;
-use technomancy_core::{
-    card::{Card, CardEffect, CardId, TriggeredCardEffect},
-    effect::{Effect, EffectInfo, EffectInfoRequest, EffectTrigger},
-    Game, GameAtom, GameError, GameId, GameObject, GameStage, GameState, GameZone, ObjectId,
-    Player, PlayerAction, PlayerId, TargetId, VerificationError, ZoneId,
-};
+use technomancy_core::card::Card;
+use technomancy_core::card::CardEffect;
+use technomancy_core::card::CardId;
+use technomancy_core::card::TriggeredCardEffect;
+use technomancy_core::effect::Effect;
+use technomancy_core::effect::EffectInfo;
+use technomancy_core::effect::EffectInfoRequest;
+use technomancy_core::effect::EffectTrigger;
+use technomancy_core::Game;
+use technomancy_core::GameAtom;
+use technomancy_core::GameError;
+use technomancy_core::GameId;
+use technomancy_core::GameObject;
+use technomancy_core::GameStage;
+use technomancy_core::GameState;
+use technomancy_core::GameZone;
+use technomancy_core::ObjectId;
+use technomancy_core::Player;
+use technomancy_core::PlayerAction;
+use technomancy_core::PlayerId;
+use technomancy_core::TargetId;
+use technomancy_core::VerificationError;
+use technomancy_core::ZoneId;
 use tracing::trace;
 
 use crate::outside::OutsideGame;
@@ -525,29 +544,44 @@ fn new_game_state_with(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, str::FromStr, sync::Arc};
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use std::sync::Arc;
 
     use rand::SeedableRng;
     use rand_xoshiro::Xoshiro256StarStar;
-    use tarpc::{server::Channel, transport::channel::UnboundedChannel, ClientMessage, Response};
+    use tarpc::server::Channel;
+    use tarpc::transport::channel::UnboundedChannel;
+    use tarpc::ClientMessage;
+    use tarpc::Response;
+    use technomancy_core::card::BaseCardKind;
+    use technomancy_core::card::Card;
+    use technomancy_core::card::CardBehaviour;
+    use technomancy_core::card::CardEffect;
+    use technomancy_core::card::CardId;
+    use technomancy_core::card::CardKind;
+    use technomancy_core::card::Cost;
+    use technomancy_core::card::TriggeredCardEffect;
+    use technomancy_core::effect::Effect;
+    use technomancy_core::effect::EffectTrigger;
+    use technomancy_core::outside::Outside;
+    use technomancy_core::outside::OutsideClient;
+    use technomancy_core::outside::OutsideRequest;
+    use technomancy_core::outside::OutsideResponse;
+    use technomancy_core::GameId;
+    use technomancy_core::ObjectId;
+    use technomancy_core::Player;
+    use technomancy_core::PlayerAction;
+    use technomancy_core::PlayerId;
+    use technomancy_core::TargetId;
+    use technomancy_core::ZoneId;
     use tokio::sync::Mutex;
     use uuid::Uuid;
 
-    use technomancy_core::{
-        card::{
-            BaseCardKind, Card, CardBehaviour, CardEffect, CardId, CardKind, Cost,
-            TriggeredCardEffect,
-        },
-        effect::{Effect, EffectTrigger},
-        outside::{Outside, OutsideClient, OutsideRequest, OutsideResponse},
-        GameId, ObjectId, Player, PlayerAction, PlayerId, TargetId, ZoneId,
-    };
-
-    use crate::{
-        effect::tests::{DealDamage, DrawCards},
-        outside::OutsideGameClient,
-        GameImplV1,
-    };
+    use crate::effect::tests::DealDamage;
+    use crate::effect::tests::DrawCards;
+    use crate::outside::OutsideGameClient;
+    use crate::GameImplV1;
 
     const BLAST_CARD: uuid::Uuid = uuid::uuid!("4abc4619-b61c-44a4-9d37-8a31bda65b48");
     const DRAW_CARD: uuid::Uuid = uuid::uuid!("ddfbf54b-2750-41c6-b657-1d6ce1e754ef");

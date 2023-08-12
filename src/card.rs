@@ -1,12 +1,18 @@
 #[cfg(test)]
 mod tests {
-    use technomancy_core::{
-        card::{
-            AgentPower, AgentSubKind, AgentToughness, BaseCardKind, Card, CardBehaviour,
-            CardEffect, CardId, CardKind, Cost, TriggeredCardEffect,
-        },
-        effect::{Effect, EffectTrigger},
-    };
+    use technomancy_core::card::AgentPower;
+    use technomancy_core::card::AgentSubKind;
+    use technomancy_core::card::AgentToughness;
+    use technomancy_core::card::BaseCardKind;
+    use technomancy_core::card::Card;
+    use technomancy_core::card::CardBehaviour;
+    use technomancy_core::card::CardEffect;
+    use technomancy_core::card::CardId;
+    use technomancy_core::card::CardKind;
+    use technomancy_core::card::Cost;
+    use technomancy_core::card::TriggeredCardEffect;
+    use technomancy_core::effect::Effect;
+    use technomancy_core::effect::EffectTrigger;
 
     use crate::effect::tests::DealDamage;
 
