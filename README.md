@@ -43,7 +43,5 @@ by it. It communicates with the server via a duplex RPC connection.
 
 ## Contributing
 
-This part of the project is intended to stay private for the time being. This
-means we cannot use anything licensed that is under the AGPL or similar
-licenses. _Notably, this includes the technomancy engine._ See above on how
-this is solved.
+The contribution process is currently being defined. This includes the code of
+conduct as well as some examples of how new features might be added.
