@@ -126,12 +126,22 @@ impl GameImplV1 {
                     }
                 }
                 GameAtom::ShuffleHandIntoLibrary { player } => {
-                    let Some([hand, library]) = next_state.zones.get_many_mut([&ZoneId::Hand(player), &ZoneId::Library(player)]) else { unreachable!() };
+                    let Some([hand, library]) = next_state
+                        .zones
+                        .get_many_mut([&ZoneId::Hand(player), &ZoneId::Library(player)])
+                    else {
+                        unreachable!()
+                    };
                     library.objects.extend(hand.objects.drain(..));
                     library.objects.shuffle(&mut self.game.rand);
                 }
                 GameAtom::DrawCards { player, count } => {
-                    let Some([hand, library]) = next_state.zones.get_many_mut([&ZoneId::Hand(player), &ZoneId::Library(player)]) else { unreachable!() };
+                    let Some([hand, library]) = next_state
+                        .zones
+                        .get_many_mut([&ZoneId::Hand(player), &ZoneId::Library(player)])
+                    else {
+                        unreachable!()
+                    };
                     let new_count = library.objects.len().saturating_sub(count);
                     hand.objects.extend(library.objects.drain(new_count..));
                 }
@@ -149,7 +159,10 @@ impl GameImplV1 {
                     choices,
                 } => {
                     let from_id = from;
-                    let Some([from, to]) = next_state.zones.get_many_mut([&from, &ZoneId::Stack]) else { unreachable!() };
+                    let Some([from, to]) = next_state.zones.get_many_mut([&from, &ZoneId::Stack])
+                    else {
+                        unreachable!()
+                    };
                     if let Some(obj_idx) = from.objects.iter().position(|o| o.id == object) {
                         let mut obj = from.objects.remove(obj_idx);
                         obj.choices = choices;
@@ -240,8 +253,8 @@ impl GameImplV1 {
                 let latest_gamestate = self.latest_gamestate();
 
                 let GameStage::KeepHand { players_keeping } = &latest_gamestate.game_stage else {
-                        unreachable!()
-                    };
+                    unreachable!()
+                };
 
                 if players_keeping.len() == self.game.players.len() {
                     trace!("All players have kept, we can start the game");
@@ -337,7 +350,10 @@ impl GameImplV1 {
                     .await?;
 
                     let Some(action) = possible_actions.get(action_idx) else {
-                        return Err(GameError::InvalidAction { list_length: possible_actions.len(), selected_action: action_idx });
+                        return Err(GameError::InvalidAction {
+                            list_length: possible_actions.len(),
+                            selected_action: action_idx,
+                        });
                     };
 
                     trace!(?action, "Player selected action");

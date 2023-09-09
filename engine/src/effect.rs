@@ -30,7 +30,9 @@ pub mod tests {
             _game: &crate::Game,
         ) -> Result<Vec<GameAtom>, ExecuteFailure> {
             let Some(EffectInfo::SingleTarget(target)) = info.get("target") else {
-                return Err(ExecuteFailure::InvalidEffectInfo { name: "target".into() });
+                return Err(ExecuteFailure::InvalidEffectInfo {
+                    name: "target".into(),
+                });
             };
 
             Ok(vec![GameAtom::DealDamage {
