@@ -9,6 +9,7 @@
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils";
+      inputs.rust-overlay.follows = "rust-overlay";
     };
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -19,22 +20,24 @@
     };
   };
 
-  outputs = { self, nixpkgs, crane, flake-utils, rust-overlay, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = inputs:
+    inputs.flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs {
+        pkgs = import inputs.nixpkgs {
           inherit system;
-          overlays = [ (import rust-overlay) ];
+          overlays = [ (import inputs.rust-overlay) ];
         };
 
         rustTarget = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-        craneLib = (crane.mkLib pkgs).overrideToolchain rustTarget;
+        craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustTarget;
 
         fmtRustTarget = pkgs.rust-bin.selectLatestNightlyWith (toolchain: pkgs.rust-bin.fromRustupToolchain { channel = "nightly"; components = [ "rustfmt" ]; });
-        fmtCraneLib = (crane.mkLib pkgs).overrideToolchain fmtRustTarget;
+        fmtCraneLib = (inputs.crane.mkLib pkgs).overrideToolchain fmtRustTarget;
 
-        tomlInfo = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; };
-        inherit (tomlInfo) pname version;
+        rustfmt' = pkgs.writeShellScriptBin "rustfmt" ''
+          exec "${fmtRustTarget}/bin/rustfmt" "$@"
+        '';
+
         src =
           let
             markdownFilter = path: _type: !((pkgs.lib.hasSuffix ".md" path) && builtins.baseNameOf path != "README.md");
@@ -52,48 +55,40 @@
             filter = filterPath;
           };
 
-        commonArgs = {
+        cargoArtifacts = craneLib.buildDepsOnly {
           inherit src;
-          pname = "technomancy_engine";
+          pname = commonArgs.pname;
         };
 
+        commonArgs = {
+          inherit src cargoArtifacts;
+          pname = "technomancy";
+        };
 
-        cargoArtifacts = craneLib.buildDepsOnly (commonArgs // { });
-
-        technomancy-engine = craneLib.buildPackage (commonArgs // {
-          inherit cargoArtifacts version;
-        });
-
-        rustfmt' = pkgs.writeShellScriptBin "rustfmt" ''
-          exec "${fmtRustTarget}/bin/rustfmt" "$@"
-        '';
-
+        technomancy = craneLib.buildPackage (commonArgs // { });
       in
       rec {
         checks = {
-          inherit technomancy-engine;
+          inherit technomancy;
 
-          technomancy-engine-clippy = craneLib.cargoClippy (commonArgs // {
-            inherit cargoArtifacts;
+          technomancy-clippy = craneLib.cargoClippy (commonArgs // {
             cargoClippyExtraArgs = "-- --deny warnings";
           });
 
-          technomancy-engine-fmt = fmtCraneLib.cargoFmt (commonArgs // { });
+          technomancy-fmt = fmtCraneLib.cargoFmt (commonArgs // { });
         };
 
-        packages.technomancy-engine = technomancy-engine;
-        packages.default = packages.technomancy-engine;
+        packages.technomancy = technomancy;
+        packages.default = packages.technomancy;
 
-        apps.technomancy-engine = flake-utils.lib.mkApp {
-          name = "technomancy-engine";
-          drv = technomancy-engine;
+        apps.technomancy = inputs.flake-utils.lib.mkApp {
+          name = "technomancy";
+          drv = technomancy;
         };
-        apps.default = apps.technomancy-engine;
+        apps.default = apps.technomancy;
 
-        devShells.default = devShells.technomancy-engine;
-        devShells.technomancy-engine = pkgs.mkShell {
-          inputsFrom = [ technomancy-engine ];
-
+        devShells.default = devShells.technomancy;
+        devShells.technomancy = pkgs.mkShell {
           nativeBuildInputs = [
             rustfmt'
             rustTarget

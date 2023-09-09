@@ -1,0 +1,10 @@
+{{#> base}}
+    <h1>Lobby: {{lobby.name}} ({{lobby.id}})</h1>
+    Joined users:
+    {{#each lobby.users}}
+        <div>
+            <span>{{this}}</span>
+        </div>
+    {{/each}}
+    Owner: {{lobby.owner}}
+{{/base}}

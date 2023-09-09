@@ -1,51 +1,37 @@
 [workspace]
-members = ["core"]
+members = ["core", "engine", "server"]
+resolver = "2"
 
-[package]
-name = "technomancy_engine"
+[workspace.package]
 version = "0.1.0"
+authors = ["Marcel Müller <neikos@neikos.email>"]
+repository = "https://github.com/technomancy-nexus/technomancy"
+license = "AGPL-3.0-only"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace.dependencies]
+technomancy_core = { version = "0.1.0", path = "./core" }
 
-[[bin]]
-name = "standalone"
-required-features = ["standalone"]
-
-[features]
-default = ["standalone"]
-standalone = ["dep:dashmap", "dep:clap", "dep:tracing-subscriber"]
-
-[dependencies]
-async-trait = "0.1.68"
-clap = { version = "4.3.11", features = ["derive", "cargo"], optional = true }
-dashmap = { version = "5.4.0", optional = true }
+async-trait = "0.1.71"
+axum = { version = "0.6.18", features = ["tracing", "http2", "macros", "ws"] }
+axum-login = "0.5.0"
+axum-sessions = "0.5.0"
+axum-template = { version = "1", features = ["handlebars"] }
+camino = "1.1.6"
+clap = { version = "4.3.11" }
+dashmap = { version = "5.4.0" }
 futures = "0.3.28"
-hashbrown = { version = "0.13.2", features = ["serde"] }
+handlebars = { version = "4.3.7", features = ["dir_source"] }
+hashbrown = { version = "0.13.2" }
 rand = "0.8.5"
-rand_xoshiro = { version = "0.6.0", features = ["serde", "serde1"] }
-serde = { version = "1.0.163", features = ["derive"] }
-tarpc = { version = "0.33.0", features = [
-    "tokio1",
-    "serde-transport",
-    "serde-transport-json",
-    "tcp",
-] }
-technomancy_core = { version = "0.0.0", path = "core" }
+rand_xoshiro = { version = "0.6.0" }
+serde = { version = "1.0.167", features = ["derive"] }
+serde_json = "1.0.100"
+tarpc = { version = "0.33.0" }
+test-log = { version = "0.2.12", default-features = false }
 thiserror = "1.0.40"
-tokio = { version = "1.28.1", features = [
-    "tokio-macros",
-    "rt-multi-thread",
-    "rt",
-    "sync",
-    "macros",
-] }
+tokio = { version = "1.29.1", features = ["full"] }
+tower-http = { version = "0.4.1", features = ["fs"] }
 tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.17", features = [
-    "env-filter",
-], optional = true }
-uuid = { version = "1.3.2", features = ["v4", "serde"] }
-
-[dev-dependencies]
-test-log = { version = "0.2.12", default-features = false, features = ["trace"] }
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.17" }
+uuid = { version = "1.3.2" }

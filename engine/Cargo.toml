@@ -1,0 +1,50 @@
+[package]
+name = "technomancy_engine"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "standalone"
+required-features = ["standalone"]
+
+[features]
+default = ["standalone"]
+standalone = ["dep:dashmap", "dep:clap", "dep:tracing-subscriber"]
+
+[dependencies]
+async-trait.workspace = true
+clap = { workspace = true, features = ["derive", "cargo"], optional = true }
+dashmap = { workspace = true, optional = true }
+futures.workspace = true
+hashbrown = { workspace = true, features = ["serde"] }
+rand.workspace = true
+rand_xoshiro = { workspace = true, features = ["serde", "serde1"] }
+serde = { workspace = true, features = ["derive"] }
+tarpc = { workspace = true, features = [
+    "tokio1",
+    "serde-transport",
+    "serde-transport-json",
+    "tcp",
+] }
+technomancy_core = { workspace = true }
+thiserror.workspace = true
+tokio = { workspace = true, features = [
+    "tokio-macros",
+    "rt-multi-thread",
+    "rt",
+    "sync",
+    "macros",
+] }
+tracing.workspace = true
+tracing-subscriber = { workspace = true, features = [
+    "env-filter",
+], optional = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+[dev-dependencies]
+test-log = { workspace = true, default-features = false, features = ["trace"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
