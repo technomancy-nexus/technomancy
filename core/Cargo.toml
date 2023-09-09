@@ -1,9 +1,11 @@
 [package]
 name = "technomancy_core"
-version = "0.0.0"
-edition = "2021"
 license = "GPL-3.0-only"
 description = "The technomancy core data types"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,7 +17,11 @@ rand = "0.8.5"
 rand_xoshiro = { version = "0.6.0", features = ["serde1"] }
 serde = { version = "1.0.171", features = ["derive"] }
 static_assertions = "1.1.0"
-tarpc = { version = "0.33.0", features = ["serde-transport", "serde-transport-json", "tcp"] }
+tarpc = { version = "0.33.0", features = [
+    "serde-transport",
+    "serde-transport-json",
+    "tcp",
+] }
 thiserror = "1.0.43"
 tokio = { version = "1.29.1", features = ["full"] }
 tracing = "0.1.37"

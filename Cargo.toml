@@ -1,8 +1,15 @@
 [workspace]
 members = ["core", "engine", "server"]
 
+[workspace.package]
+version = "0.1.0"
+authors = ["Marcel Müller <neikos@neikos.email>"]
+repository = "https://github.com/technomancy-nexus/technomancy"
+license = "AGPL-3.0-only"
+edition = "2021"
+
 [workspace.dependencies]
-technomancy_core = { version = "0.0.0", path = "./core" }
+technomancy_core = { version = "0.1.0", path = "./core" }
 
 async-trait = "0.1.71"
 axum = { version = "0.6.18", features = ["tracing", "http2", "macros", "ws"] }

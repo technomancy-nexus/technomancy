@@ -1,15 +1,20 @@
 use std::collections::HashSet;
 
-use axum::{
-    extract::{Path, State},
-    response::{IntoResponse, Redirect},
-    Extension, Form,
-};
+use axum::extract::Path;
+use axum::extract::State;
+use axum::response::IntoResponse;
+use axum::response::Redirect;
+use axum::Extension;
+use axum::Form;
 use axum_template::RenderHtml;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 
-use crate::{user::User, LobbyStorage, PathKey, TemplateEngine};
+use crate::user::User;
+use crate::LobbyStorage;
+use crate::PathKey;
+use crate::TemplateEngine;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct Lobby {

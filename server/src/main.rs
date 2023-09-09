@@ -1,22 +1,33 @@
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
-use axum::{
-    extract::{rejection::MatchedPathRejection, FromRef, FromRequestParts, MatchedPath, State},
-    http::request::Parts,
-    response::{IntoResponse, Redirect},
-    routing::{get, post},
-    Extension, Form, RequestPartsExt, Router,
-};
-use axum_login::{
-    extractors::AuthContext, memory_store::MemoryStore as AuthMemoryStore, AuthLayer,
-    RequireAuthorizationLayer,
-};
-use axum_sessions::{async_session::MemoryStore as SessionMemoryStore, SessionLayer};
-
-use axum_template::{engine::Engine, RenderHtml};
+use axum::extract::rejection::MatchedPathRejection;
+use axum::extract::FromRef;
+use axum::extract::FromRequestParts;
+use axum::extract::MatchedPath;
+use axum::extract::State;
+use axum::http::request::Parts;
+use axum::response::IntoResponse;
+use axum::response::Redirect;
+use axum::routing::get;
+use axum::routing::post;
+use axum::Extension;
+use axum::Form;
+use axum::RequestPartsExt;
+use axum::Router;
+use axum_login::extractors::AuthContext;
+use axum_login::memory_store::MemoryStore as AuthMemoryStore;
+use axum_login::AuthLayer;
+use axum_login::RequireAuthorizationLayer;
+use axum_sessions::async_session::MemoryStore as SessionMemoryStore;
+use axum_sessions::SessionLayer;
+use axum_template::engine::Engine;
+use axum_template::RenderHtml;
 use handlebars::Handlebars;
 use lobby::Lobby;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::RwLock;
 use tower_http::services::ServeDir;
 use tracing::trace;

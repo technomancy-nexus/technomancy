@@ -1,4 +1,5 @@
-use axum_login::{secrecy::SecretVec, AuthUser};
+use axum_login::secrecy::SecretVec;
+use axum_login::AuthUser;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
