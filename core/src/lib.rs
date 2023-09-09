@@ -1,16 +1,19 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::sync::Arc;
 
-use card::{Card, CardId};
-use effect::{EffectInfo, ExecuteFailure};
+use card::Card;
+use card::CardId;
+use effect::EffectInfo;
+use effect::ExecuteFailure;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
 pub mod card;
 pub mod effect;
+pub mod meta;
 pub mod outside;
 
 pub fn get_seeded_uuid(rng: &mut impl Rng) -> uuid::Uuid {
@@ -25,8 +28,9 @@ pub fn get_seeded_uuid(rng: &mut impl Rng) -> uuid::Uuid {
 pub struct GameId(Uuid);
 
 impl GameId {
-    pub fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
     }
 }
 
@@ -121,8 +125,9 @@ pub enum PlayerAction {
 pub struct PlayerId(Uuid);
 
 impl PlayerId {
-    pub fn new(rng: &mut impl Rng) -> Self {
-        Self(get_seeded_uuid(rng))
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
     }
 }
 
@@ -130,8 +135,6 @@ impl PlayerId {
 pub struct Player {
     pub id: PlayerId,
     pub initial_cards: Vec<CardId>,
-    pub starting_health: usize,
-    pub health: isize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]

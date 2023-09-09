@@ -30,6 +30,9 @@
         rustTarget = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
         craneLib = (crane.mkLib pkgs).overrideToolchain rustTarget;
 
+        fmtRustTarget = pkgs.rust-bin.selectLatestNightlyWith (toolchain: pkgs.rust-bin.fromRustupToolchain { channel = "nightly"; components = [ "rustfmt" ]; });
+        fmtCraneLib = (crane.mkLib pkgs).overrideToolchain fmtRustTarget;
+
         tomlInfo = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; };
         inherit (tomlInfo) pname version;
         src =
@@ -61,6 +64,10 @@
           inherit cargoArtifacts version;
         });
 
+        rustfmt' = pkgs.writeShellScriptBin "rustfmt" ''
+          exec "${fmtRustTarget}/bin/rustfmt" "$@"
+        '';
+
       in
       rec {
         checks = {
@@ -71,7 +78,7 @@
             cargoClippyExtraArgs = "-- --deny warnings";
           });
 
-          technomancy-engine-fmt = craneLib.cargoFmt (commonArgs // { });
+          technomancy-engine-fmt = fmtCraneLib.cargoFmt (commonArgs // { });
         };
 
         packages.technomancy-engine = technomancy-engine;
@@ -88,6 +95,7 @@
           inputsFrom = [ technomancy-engine ];
 
           nativeBuildInputs = [
+            rustfmt'
             rustTarget
             pkgs.bacon
             pkgs.nodePackages.mermaid-cli

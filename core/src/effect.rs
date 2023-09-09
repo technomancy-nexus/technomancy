@@ -1,8 +1,13 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::collections::HashMap;
+use std::fmt::Debug;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::{Game, GameAtom, ObjectId, TargetId};
+use crate::Game;
+use crate::GameAtom;
+use crate::ObjectId;
+use crate::TargetId;
 
 #[derive(Debug)]
 pub enum EffectTrigger {
@@ -23,6 +28,7 @@ pub enum Effect {
     Instant(Box<dyn InstantEffect>),
     Continuous(ContinuousEffect),
 }
+static_assertions::assert_impl_all!(Effect: Send, Sync);
 
 #[derive(Debug)]
 pub enum EffectInfoRequest {
@@ -53,6 +59,9 @@ pub trait InstantEffect: Debug + Sync + Send {
         game: &Game,
     ) -> Result<Vec<GameAtom>, ExecuteFailure>;
 }
+
+static_assertions::assert_impl_all!(dyn InstantEffect: Send, Sync);
+static_assertions::assert_obj_safe!(InstantEffect);
 
 #[derive(Debug)]
 pub enum ContinuousEffect {}

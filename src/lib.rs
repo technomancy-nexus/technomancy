@@ -1,15 +1,34 @@
 #![allow(dead_code, clippy::too_many_arguments)]
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use outside::OutsideGameClient;
-use rand::{seq::SliceRandom, Rng};
+use rand::seq::SliceRandom;
+use rand::Rng;
 use rand_xoshiro::Xoshiro256StarStar;
-use technomancy_core::{
-    card::{Card, CardEffect, CardId, TriggeredCardEffect},
-    effect::{Effect, EffectInfo, EffectInfoRequest, EffectTrigger},
-    Game, GameAtom, GameError, GameId, GameObject, GameStage, GameState, GameZone, ObjectId,
-    Player, PlayerAction, PlayerId, TargetId, VerificationError, ZoneId,
-};
+use technomancy_core::card::Card;
+use technomancy_core::card::CardEffect;
+use technomancy_core::card::CardId;
+use technomancy_core::card::TriggeredCardEffect;
+use technomancy_core::effect::Effect;
+use technomancy_core::effect::EffectInfo;
+use technomancy_core::effect::EffectInfoRequest;
+use technomancy_core::effect::EffectTrigger;
+use technomancy_core::Game;
+use technomancy_core::GameAtom;
+use technomancy_core::GameError;
+use technomancy_core::GameId;
+use technomancy_core::GameObject;
+use technomancy_core::GameStage;
+use technomancy_core::GameState;
+use technomancy_core::GameZone;
+use technomancy_core::ObjectId;
+use technomancy_core::Player;
+use technomancy_core::PlayerAction;
+use technomancy_core::PlayerId;
+use technomancy_core::TargetId;
+use technomancy_core::VerificationError;
+use technomancy_core::ZoneId;
 use tracing::trace;
 
 use crate::outside::OutsideGame;
@@ -18,31 +37,20 @@ pub mod card;
 pub mod effect;
 pub mod outside;
 
-/// The technomancy engine
-pub struct Engine {
-    cards: Arc<std::collections::HashMap<CardId, Card>>,
-    games: std::collections::HashMap<GameId, Game>,
+fn assert_send<'u, R>(
+    fut: impl 'u + Send + std::future::Future<Output = R>,
+) -> impl 'u + Send + std::future::Future<Output = R> {
+    fut
 }
 
-impl Engine {
-    pub fn new(cards: std::collections::HashMap<CardId, Card>) -> Self {
-        Self {
-            cards: Arc::new(cards),
-            games: std::collections::HashMap::new(),
-        }
-    }
-
-    fn card_exists(&self, card: CardId) -> bool {
-        self.cards.contains_key(&card)
-    }
-}
-
-struct GameImplV1 {
+#[derive(Debug)]
+pub struct GameImplV1 {
     game: Game,
 }
 
 impl GameImplV1 {
     pub fn new(
+        id: GameId,
         mut rand: Xoshiro256StarStar,
         cards: Arc<std::collections::HashMap<CardId, Card>>,
         players: std::collections::HashMap<PlayerId, Player>,
@@ -51,9 +59,9 @@ impl GameImplV1 {
         let initial_game_state = new_game_state_with(&mut rand, &players, &order);
         GameImplV1 {
             game: Game {
+                id,
                 cards,
                 players,
-                id: GameId::new(&mut rand),
                 rand,
                 game_states: vec![initial_game_state],
                 history: vec![],
@@ -61,12 +69,12 @@ impl GameImplV1 {
         }
     }
 
-    pub fn verify(&self, engine: &Engine) -> Result<(), Vec<VerificationError>> {
+    pub fn verify(&self) -> Result<(), Vec<VerificationError>> {
         let mut errors = vec![];
 
         for (id, player) in &self.game.players {
             for card in &player.initial_cards {
-                if !engine.card_exists(*card) {
+                if !self.game.cards.contains_key(card) {
                     errors.push(VerificationError::PlayerInvalidCard {
                         id: *id,
                         card: *card,
@@ -105,9 +113,8 @@ impl GameImplV1 {
                     source: _,
                     target,
                 } => match target {
-                    TargetId::Player(ply) => {
-                        let player = self.game.players.get_mut(&ply).unwrap();
-                        player.health -= amount as isize;
+                    TargetId::Player(_ply) => {
+                        todo!("Do something with health {amount}")
                     }
                     TargetId::Object(_) => todo!(),
                 },
@@ -220,7 +227,8 @@ impl GameImplV1 {
                     .filter(|p| !players_keeping.contains(p))
                     .copied()
                     .collect();
-                let players_keeping = outside.get_player_keeping(players_not_kept_yet).await?;
+                let players_keeping =
+                    assert_send(outside.get_player_keeping(players_not_kept_yet)).await?;
 
                 self.apply_atoms(
                     players_keeping
@@ -276,10 +284,12 @@ impl GameImplV1 {
                                 }) => Some(effects),
                                 _ => None,
                             })
-                            .flatten();
+                            .flatten()
+                            .enumerate()
+                            .collect::<Vec<_>>();
 
                         let mut atoms = vec![];
-                        for (idx, effect) in resolve_effects.enumerate() {
+                        for (idx, effect) in resolve_effects {
                             if let Effect::Instant(eff) = effect {
                                 let info = top_item
                                     .choices
@@ -288,10 +298,12 @@ impl GameImplV1 {
                                     .map(|((_, k), v)| (k.clone(), v.clone()))
                                     .collect();
 
-                                let effect_atoms = eff
-                                    .execute(info, top_item.id, &self.game)
-                                    .await
-                                    .map_err(|e| GameError::EffectExecuteFailure { failure: e })?;
+                                let effect_atoms =
+                                    assert_send(eff.execute(info, top_item.id, &self.game))
+                                        .await
+                                        .map_err(|e| GameError::EffectExecuteFailure {
+                                            failure: e,
+                                        })?;
                                 atoms.extend(effect_atoms);
                             }
                         }
@@ -318,9 +330,11 @@ impl GameImplV1 {
                                 object: hand_obj.id,
                             }),
                     );
-                    let action_idx = outside
-                        .get_next_player_action_from(*active_player, possible_actions.clone())
-                        .await?;
+                    let action_idx = assert_send(
+                        outside
+                            .get_next_player_action_from(*active_player, possible_actions.clone()),
+                    )
+                    .await?;
 
                     let Some(action) = possible_actions.get(action_idx) else {
                         return Err(GameError::InvalidAction { list_length: possible_actions.len(), selected_action: action_idx });
@@ -384,10 +398,12 @@ impl GameImplV1 {
                                     }) => Some(effects),
                                     _ => None,
                                 })
-                                .flatten();
+                                .flatten()
+                                .enumerate()
+                                .collect::<Vec<_>>();
 
                             let mut gathered_info = HashMap::new();
-                            for (idx, e) in resolve_effects.enumerate() {
+                            for (idx, e) in resolve_effects {
                                 match e {
                                     Effect::Continuous(_) => {
                                         return Err(GameError::InvalidCardState)
@@ -418,15 +434,16 @@ impl GameImplV1 {
                                                                 .filter(|_o| todo!())
                                                                 .map(|o| TargetId::Object(o.id)),
                                                         );
-                                                        let choices = outside
-                                                            .get_target_choices_from_given(
+                                                        let choices = assert_send(
+                                                            outside.get_target_choices_from_given(
                                                                 *active_player,
                                                                 *object,
                                                                 name.clone(),
                                                                 possible_choices.clone(),
                                                                 1,
-                                                            )
-                                                            .await?;
+                                                            ),
+                                                        )
+                                                        .await?;
 
                                                         if choices.len() != 1 {
                                                             return Err(
@@ -466,7 +483,8 @@ impl GameImplV1 {
                             // Pay costs
                             // Step 5
 
-                            let player_passing = outside.get_player_passing(*active_player).await?;
+                            let player_passing =
+                                assert_send(outside.get_player_passing(*active_player)).await?;
 
                             let mut atoms = vec![GameAtom::PlayerPlayCard {
                                 player: *active_player,
@@ -526,32 +544,53 @@ fn new_game_state_with(
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, str::FromStr, sync::Arc};
+    use std::collections::HashMap;
+    use std::str::FromStr;
+    use std::sync::Arc;
 
-    use rand::{Rng, SeedableRng};
+    use rand::SeedableRng;
     use rand_xoshiro::Xoshiro256StarStar;
-    use tarpc::{server::Channel, transport::channel::UnboundedChannel, ClientMessage, Response};
+    use tarpc::server::Channel;
+    use tarpc::transport::channel::UnboundedChannel;
+    use tarpc::ClientMessage;
+    use tarpc::Response;
+    use technomancy_core::card::BaseCardKind;
+    use technomancy_core::card::Card;
+    use technomancy_core::card::CardBehaviour;
+    use technomancy_core::card::CardEffect;
+    use technomancy_core::card::CardId;
+    use technomancy_core::card::CardKind;
+    use technomancy_core::card::Cost;
+    use technomancy_core::card::TriggeredCardEffect;
+    use technomancy_core::effect::Effect;
+    use technomancy_core::effect::EffectTrigger;
+    use technomancy_core::outside::Outside;
+    use technomancy_core::outside::OutsideClient;
+    use technomancy_core::outside::OutsideRequest;
+    use technomancy_core::outside::OutsideResponse;
+    use technomancy_core::GameId;
+    use technomancy_core::ObjectId;
+    use technomancy_core::Player;
+    use technomancy_core::PlayerAction;
+    use technomancy_core::PlayerId;
+    use technomancy_core::TargetId;
+    use technomancy_core::ZoneId;
     use tokio::sync::Mutex;
     use uuid::Uuid;
 
-    use technomancy_core::{
-        card::{
-            BaseCardKind, Card, CardBehaviour, CardEffect, CardId, CardKind, Cost,
-            TriggeredCardEffect,
-        },
-        effect::{Effect, EffectTrigger},
-        outside::{Outside, OutsideClient, OutsideRequest, OutsideResponse},
-        GameId, ObjectId, Player, PlayerAction, PlayerId, TargetId, ZoneId,
-    };
-
-    use crate::{
-        effect::tests::{DealDamage, DrawCards},
-        outside::OutsideGameClient,
-        Engine, GameImplV1,
-    };
+    use crate::effect::tests::DealDamage;
+    use crate::effect::tests::DrawCards;
+    use crate::outside::OutsideGameClient;
+    use crate::GameImplV1;
 
     const BLAST_CARD: uuid::Uuid = uuid::uuid!("4abc4619-b61c-44a4-9d37-8a31bda65b48");
     const DRAW_CARD: uuid::Uuid = uuid::uuid!("ddfbf54b-2750-41c6-b657-1d6ce1e754ef");
+
+    #[allow(unused)]
+    fn check_send() {
+        let mut harness = SimpleTestHarness::new(None, ServerAnswers::default());
+        crate::assert_send(harness.game_impl.run(&harness.outside_client));
+    }
 
     fn existing_cards() -> HashMap<CardId, Card> {
         let blast = Card {
@@ -604,28 +643,20 @@ mod tests {
         ]
     }
 
-    fn playtesters(rand: &mut impl Rng) -> HashMap<PlayerId, Player> {
+    fn playtesters() -> HashMap<PlayerId, Player> {
         vec![
             Player {
-                id: PlayerId::new(rand),
+                id: PlayerId::new(),
                 initial_cards: simple_deck(),
-                starting_health: 25,
-                health: 25,
             },
             Player {
                 initial_cards: simple_deck(),
-                id: PlayerId::new(rand),
-                starting_health: 25,
-                health: 25,
+                id: PlayerId::new(),
             },
         ]
         .into_iter()
         .map(|p| (p.id, p))
         .collect()
-    }
-
-    fn new_engine() -> Engine {
-        Engine::new(existing_cards())
     }
 
     fn outside_client(
@@ -639,7 +670,13 @@ mod tests {
     ) {
         let (left, right) = tarpc::transport::channel::unbounded();
         let client = OutsideClient::new(tarpc::client::Config::default(), left).spawn();
-        (right, OutsideGameClient { game_id, client })
+        (
+            right,
+            OutsideGameClient {
+                game_id,
+                client: Arc::new(client),
+            },
+        )
     }
 
     struct ServerAnswers {
@@ -735,7 +772,6 @@ mod tests {
     }
 
     struct SimpleTestHarness {
-        engine: Engine,
         player_order: Vec<PlayerId>,
         game_impl: GameImplV1,
         outside_client: OutsideGameClient,
@@ -746,7 +782,6 @@ mod tests {
         seed: Option<u64>,
     ) -> (
         Vec<PlayerId>,
-        Engine,
         GameImplV1,
         tarpc::transport::channel::UnboundedChannel<
             tarpc::ClientMessage<OutsideRequest>,
@@ -754,16 +789,17 @@ mod tests {
         >,
         OutsideGameClient,
     ) {
-        let mut rand = Xoshiro256StarStar::seed_from_u64(seed.unwrap_or(1337));
-        let players = playtesters(&mut rand);
+        let rand = Xoshiro256StarStar::seed_from_u64(seed.unwrap_or(1337));
+        let players = playtesters();
         let player_order: Vec<_> = players.keys().copied().collect();
-        let engine = new_engine();
+        let cards = existing_cards();
 
-        let game_impl = GameImplV1::new(rand, engine.cards.clone(), players, player_order.clone());
+        let id = GameId::new();
+        let game_impl = GameImplV1::new(id, rand, Arc::new(cards), players, player_order.clone());
 
         let (server, outside_client) = outside_client(game_impl.game.id);
 
-        (player_order, engine, game_impl, server, outside_client)
+        (player_order, game_impl, server, outside_client)
     }
 
     impl SimpleTestHarness {
@@ -789,11 +825,10 @@ mod tests {
             SimpleTestHarness,
             UnboundedChannel<ClientMessage<OutsideRequest>, Response<OutsideResponse>>,
         ) {
-            let (player_order, engine, game_impl, server, outside_client) = init_harness(seed);
+            let (player_order, game_impl, server, outside_client) = init_harness(seed);
 
             (
                 SimpleTestHarness {
-                    engine,
                     player_order,
                     game_impl,
                     outside_client,
