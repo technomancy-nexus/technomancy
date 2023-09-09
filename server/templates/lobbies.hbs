@@ -1,0 +1,15 @@
+{{#> base}}
+    {{#each lobbies}}
+        <div>
+            <span>{{this.name}}</span>
+            <button hx-post="/lobbies/{{this.id}}/join" hx-target="body">Join</button>
+        </div>
+    {{/each}}
+
+    <hr>
+    <form action="/lobbies" method="POST">
+        <label for="lobby_name">Name</label>
+        <input type="text" id="lobby_name" name="name"/>
+        <input type="submit" value="Create" />
+    </form>
+{{/base}}

@@ -1,0 +1,20 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1.71"
+axum = { version = "0.6.18", features = ["tracing", "http2", "macros", "ws"] }
+axum-login = "0.5.0"
+axum-sessions = "0.5.0"
+axum-template = { version = "1", features = ["handlebars"] }
+handlebars = { version = "4.3.7", features = ["dir_source"] }
+serde = { version = "1.0.167", features = ["derive"] }
+serde_json = "1.0.100"
+tokio = { version = "1.29.1", features = ["full"] }
+tower-http = { version = "0.4.1", features = ["fs"] }
+tracing = { version = "0.1.37" }
+tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
