@@ -107,6 +107,7 @@ fn app() -> Router {
         "default".to_string(),
         Lobby {
             id: "default".to_string(),
+            owner: "Nobody".to_string(),
             name: "The Default Lobby".to_string(),
             users: Default::default(),
         },
