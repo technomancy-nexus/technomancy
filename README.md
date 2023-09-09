@@ -9,7 +9,11 @@ following parts:
 - A server that serves as the backend engine, where the game rules are loaded
   in, simply called the 'engine'
 
-## Frontend
+## Server
+
+The server is naturally split up between two parts: frontend and backend.
+
+### Frontend
 
 The frontend (aka, the visible parts of clients) is expected to be written in
 HTML and Javascript and/or WASM.
@@ -24,7 +28,7 @@ Explicit targets:
 Potentially other web targets
 
 
-## Backend
+### Backend
 
 The backend is written in Rust and serves HTML as well as provide connectivity
 through for example websockets.
@@ -34,13 +38,10 @@ requirement**.
 
 ## Engine
 
-The engine will encompass the technomancy engine, it is being developed at:
-https://github.com/technomancy-nexus/engine.
-
+The engine is what runs and verifies the rules of actions done in games powered
+by it. It communicates with the server via a duplex RPC connection.
 
 ## Contributing
 
-This part of the project is intended to stay private for the time being. This
-means we cannot use anything licensed that is under the AGPL or similar
-licenses. _Notably, this includes the technomancy engine._ See above on how
-this is solved.
+The contribution process is currently being defined. This includes the code of
+conduct as well as some examples of how new features might be added.
