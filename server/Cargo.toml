@@ -14,6 +14,8 @@ axum = { workspace = true, features = ["tracing", "http2", "macros", "ws"] }
 axum-login.workspace = true
 axum-sessions.workspace = true
 axum-template = { workspace = true, features = ["handlebars"] }
+camino.workspace = true
+clap = { workspace = true, features = ["derive"] }
 handlebars = { workspace = true, features = ["dir_source"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

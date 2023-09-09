@@ -24,6 +24,8 @@ use axum_sessions::async_session::MemoryStore as SessionMemoryStore;
 use axum_sessions::SessionLayer;
 use axum_template::engine::Engine;
 use axum_template::RenderHtml;
+use camino::Utf8PathBuf;
+use clap::Parser;
 use handlebars::Handlebars;
 use lobby::Lobby;
 use serde::Deserialize;
@@ -31,10 +33,44 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 use tower_http::services::ServeDir;
 use tracing::trace;
+use tracing_subscriber::EnvFilter;
 use user::User;
 
 mod lobby;
 mod user;
+
+#[derive(Debug, clap::Parser)]
+#[command(author, version, about)]
+struct Args {
+    #[arg(long, default_value_t = Utf8PathBuf::from("./server/templates"))]
+    template_directory: Utf8PathBuf,
+
+    #[arg(long, default_value_t = Utf8PathBuf::from("./server/static"))]
+    static_directory: Utf8PathBuf,
+}
+
+#[tokio::main]
+async fn main() {
+    let filter = EnvFilter::from_default_env();
+    tracing_subscriber::fmt::fmt()
+        .with_env_filter(filter)
+        .pretty()
+        .init();
+
+    let args = Args::parse();
+
+    trace!("Building app");
+    let app = app(args.template_directory, args.static_directory);
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    tracing::debug!(?addr, "listening on http://{addr}");
+
+    trace!("Starting server");
+    axum::Server::bind(&addr)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
+}
 
 type TemplateEngine = Engine<Handlebars<'static>>;
 type UserStorage = Arc<RwLock<HashMap<String, User>>>;
@@ -72,25 +108,10 @@ struct AppState {
     lobby_storage: LobbyStorage,
 }
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt::init();
-
-    let app = app();
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    tracing::debug!(?addr, "listening");
-
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-}
-
 type Auth = AuthContext<String, User, AuthMemoryStore<String, User>>;
 type RequireAuth = RequireAuthorizationLayer<String, User>;
 
-fn app() -> Router {
+fn app(template_directory: Utf8PathBuf, static_directory: Utf8PathBuf) -> Router {
     let secret = [0u8; 64];
 
     let session_store = SessionMemoryStore::new();
@@ -106,9 +127,11 @@ fn app() -> Router {
     let user_store: AuthMemoryStore<String, User> = AuthMemoryStore::new(&store);
     let auth_layer = AuthLayer::new(user_store, &secret);
 
+    trace!("Initializing handlebars");
     let mut hbs = Handlebars::new();
     hbs.set_dev_mode(true);
-    hbs.register_templates_directory(".hbs", "templates")
+
+    hbs.register_templates_directory(".hbs", template_directory)
         .unwrap();
 
     let templates = hbs.get_templates().keys().collect::<Vec<_>>();
@@ -139,7 +162,7 @@ fn app() -> Router {
         .route_layer(RequireAuth::login())
         .route("/login", get(login_handler))
         .route("/login", post(do_login))
-        .nest_service("/static", ServeDir::new("static"))
+        .nest_service("/static", ServeDir::new(static_directory))
         .layer(auth_layer)
         .layer(session_layer)
         .with_state(state)
