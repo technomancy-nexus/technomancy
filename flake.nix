@@ -19,19 +19,19 @@
     };
   };
 
-  outputs = { self, nixpkgs, crane, flake-utils, rust-overlay, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = inputs:
+    inputs.flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs {
+        pkgs = import inputs.nixpkgs {
           inherit system;
-          overlays = [ (import rust-overlay) ];
+          overlays = [ (import inputs.rust-overlay) ];
         };
 
         rustTarget = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-        craneLib = (crane.mkLib pkgs).overrideToolchain rustTarget;
+        craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustTarget;
 
         fmtRustTarget = pkgs.rust-bin.selectLatestNightlyWith (toolchain: pkgs.rust-bin.fromRustupToolchain { channel = "nightly"; components = [ "rustfmt" ]; });
-        fmtCraneLib = (crane.mkLib pkgs).overrideToolchain fmtRustTarget;
+        fmtCraneLib = (inputs.crane.mkLib pkgs).overrideToolchain fmtRustTarget;
 
         tomlInfo = craneLib.crateNameFromCargoToml { cargoToml = ./Cargo.toml; };
         inherit (tomlInfo) pname version;
@@ -84,7 +84,7 @@
         packages.technomancy-engine = technomancy-engine;
         packages.default = packages.technomancy-engine;
 
-        apps.technomancy-engine = flake-utils.lib.mkApp {
+        apps.technomancy-engine = inputs.flake-utils.lib.mkApp {
           name = "technomancy-engine";
           drv = technomancy-engine;
         };
